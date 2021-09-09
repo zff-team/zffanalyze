@@ -1,0 +1,18 @@
+[package]
+name = "zffmetareader"
+authors = ["ph0llux <ph0llux@pm.me>"]
+version = "0.1.0"
+edition = "2018"
+license = "MIT OR Apache-2.0"
+
+[[bin]]
+name = "zffmetareader"
+path = "src/bin/main.rs"
+test = true
+bench = true
+
+[dependencies]
+clap = "2.33"
+zff = { path = "../zff" }
+#signing
+ed25519-dalek = { version = "1.0.1", features = [ "rand" ] }
