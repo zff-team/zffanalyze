@@ -1,11 +1,11 @@
 [package]
-name = "zffmetareader"
+name = "zffanalyze"
 authors = ["ph0llux <ph0llux@pm.me>"]
 version = "0.10.1"
 edition = "2021"
 rust-version = "1.56.1"
 license = "MIT OR Apache-2.0"
-description = "A command line utility to read the metadata of a zff image."
+description = "A command line utility to read and analyze a zff image."
 homepage = "https://github.com/ph0llux/zff"
 repository = "https://github.com/ph0llux/zff"
 keywords = ["forensics", "security", "acquisition", "file-format", "file"]
@@ -13,14 +13,14 @@ categories = ["command-line-utilities"]
 publish = true
 
 [[bin]]
-name = "zffmetareader"
+name = "zffanalyze"
 path = "src/bin/main.rs"
 test = true
 bench = true
 
 [dependencies]
-clap = "2.33"
-zff = { version = "0.10.1" }
+clap = { version="3.0.5", features=[ "derive" ] }
+zff = { path="../../Projekte/zff" }
 base64 = "0.13.0"
 #serializing crates
 serde = "1.0"
