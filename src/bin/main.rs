@@ -1,532 +1,622 @@
+// - extern crates
+#[macro_use] extern crate serde;
+
 // - STD
-use std::fs::{File,read_dir};
-use std::path::{PathBuf, Path};
+use std::fs::{File};
+
 use std::process::exit;
-use std::io::{self, Seek,Read, BufRead};
-use std::{thread};
+use std::io::{Seek, Read, SeekFrom};
+
+use std::collections::HashMap;
 
 // - modules
 mod lib;
 
 // - internal
+use lib::*;
 use lib::constants::*;
 use zff::{
     Result,
-    header::*,
+    constants::*,
+    version1::header::{MainHeader as MainHeaderV1, SegmentHeader as SegmentHeaderV1, ChunkHeader as ChunkHeaderV1},
+    version1::footer::{SegmentFooter as SegmentFooterV1},
+    version2::header::{MainHeader as MainHeaderV2, SegmentHeader as SegmentHeaderV2, ObjectHeader, FileHeader, HashHeader as HashHeaderV2},
+    version2::footer::{SegmentFooter as SegmentFooterV2, MainFooter, ObjectFooterPhysical, ObjectFooterLogical, FileFooter, },
+    ValueDecoder,
     HeaderCoding,
-    ZffReader,
-    ZffError,
     ZffErrorKind,
-    Hash,
-    ED25519_DALEK_PUBKEY_LEN,
 };
 
 // - external
-use clap::{Arg, App, ArgMatches};
-use toml;
-use serde_json;
-use base64;
+use clap::{Parser, ArgEnum};
 
-// parsing incoming arguments.
-fn arguments() -> ArgMatches<'static> {
-    let matches = App::new(PROGRAM_NAME)
-                    .version(PROGRAM_VERSION)
-                    .author(PROGRAM_AUTHOR)
-                    .about(PROGRAM_DESCRIPTION)
-                    .arg(Arg::with_name(CLAP_ARG_NAME_INPUT_FILE)
-                        .help(CLAP_ARG_HELP_INPUT_FILE)
-                        .short(CLAP_ARG_SHORT_INPUT_FILE)
-                        .long(CLAP_ARG_LONG_INPUT_FILE)
-                        .required(true)
-                        .takes_value(true))
-                    .arg(Arg::with_name(CLAP_ARG_NAME_OUTPUT_FORMAT)
-                        .help(CLAP_ARG_HELP_OUTPUT_FORMAT)
-                        .short(CLAP_ARG_SHORT_OUTPUT_FORMAT)
-                        .long(CLAP_ARG_LONG_OUTPUT_FORMAT)
-                        .possible_values(&CLAP_ARG_POSSIBLE_VALUES_OUTPUT_FORMAT)
-                        .default_value(CLAP_ARG_DEFAULT_VALUE_OUTPUT_FORMAT)
-                        .takes_value(true))
-                    .arg(Arg::with_name(CLAP_ARG_NAME_PASSWORD)
-                        .help(CLAP_ARG_HELP_PASSWORD)
-                        .short(CLAP_ARG_SHORT_PASSWORD)
-                        .long(CLAP_ARG_LONG_PASSWORD)
-                        .takes_value(true))
-                    .arg(Arg::with_name(CLAP_ARG_NAME_VERIFY)
-                        .help(CLAP_ARG_HELP_VERIFY)
-                        .short(CLAP_ARG_SHORT_VERIFY)
-                        .long(CLAP_ARG_LONG_VERIFY)
-                        .requires(CLAP_ARG_NAME_PUBKEYFILE))
-                    .arg(Arg::with_name(CLAP_ARG_NAME_PUBKEYFILE)
-                        .help(CLAP_ARG_HELP_PUBKEYFILE)
-                        .short(CLAP_ARG_SHORT_PUBKEYFILE)
-                        .long(CLAP_ARG_LONG_PUBKEYFILE)
-                        .takes_value(true))
-                    .arg(Arg::with_name(CLAP_ARG_NAME_INTEGRITY_CHECK)
-                        .help(CLAP_ARG_HELP_INTEGRITY_CHECK)
-                        .short(CLAP_ARG_SHORT_INTEGRITY_CHECK)
-                        .long(CLAP_ARG_LONG_INTEGRITY_CHECK))
-                    .get_matches();
-    matches
+#[derive(Parser)]
+#[clap(about, version, author)]
+struct Cli {
+
+    /// The input files. This should be your zff image files. You can use this Option multiple times.
+    #[clap(short='i', long="inputfiles")]
+    inputfile: Vec<String>,
+
+    /// The output format.
+    #[clap(short='f', long="output-format", arg_enum, default_value="toml")]
+    output_format: OutputFormat,
+
+    /// Verbose mode to show each chunk information.
+    #[clap(short='v', long="verbose")]
+    verbose: bool,
+
+    ///TODO: Implement
+    /// The password, if the file has an encrypted main header
+    #[clap(short='p', long="decryption-password")]
+    decryption_password: Option<String>,
+
+    ///TODO: Implement
+    /// The path to the file which contains the public key.
+    #[clap(short='k', long="publickey-file")]
+    publickey_file: Option<String>,
+
+    ///TODO: Implement
+    /// Checks the integrity of the imaged data by calculating/comparing the used hash values.
+    #[clap(short='c', long="integrity-check")]
+    check_integrity: bool,
 }
 
-fn decode_main_header_unencrypted<R: Read>(input_file: &mut R, arguments: &ArgMatches) {
-    match MainHeader::decode_directly(input_file) {
-        // is_ok() if this file contains an unencrypted (well formatted) main header.
-        Ok(header) => {
-            // Calling .unwrap() is safe here because this argument has a default value.
-            match arguments.value_of(CLAP_ARG_NAME_OUTPUT_FORMAT).unwrap() {
-                CLAP_ARG_VALUE_OUTPUT_FORMAT_TOML => match toml::Value::try_from(&header) {
-                    Ok(value) => {
-                        println!("{}", value);
-                        exit(EXIT_STATUS_SUCCESS);
-                    },
-                    Err(_) => {
-                        println!("{}", ERROR_SERIALIZE_TOML);
-                        exit(EXIT_STATUS_ERROR);
-                    }
-                },
-                CLAP_ARG_VALUE_OUTPUT_FORMAT_JSON => match serde_json::to_string(&header) {
-                    Ok(value) => {
-                        println!("{}", value);
-                        exit(EXIT_STATUS_SUCCESS);
-                    },
-                    Err(_) => {
-                        println!("{}", ERROR_SERIALIZE_JSON);
-                        exit(EXIT_STATUS_ERROR);
-                    }
-                },
-                CLAP_ARG_VALUE_OUTPUT_FORMAT_JSON_PRETTY => match serde_json::to_string_pretty(&header) {
-                    Ok(value) => {
-                        println!("{}", value);
-                        exit(EXIT_STATUS_SUCCESS);
-                    },
-                    Err(_) => {
-                        println!("{}", ERROR_SERIALIZE_JSON);
-                        exit(EXIT_STATUS_ERROR);
-                    }
-                }
-                _ => {
-                    println!("{}", ERROR_SERIALIZE_UNKNOWN_SERIALIZER);
-                    exit(EXIT_STATUS_ERROR);
-                }
-            }
-        },
-        Err(e) => {
-            println!("{}{}", ERROR_PARSE_MAIN_HEADER, e.to_string());
-            exit(EXIT_STATUS_ERROR);
-        },
-    }
+#[derive(ArgEnum, Clone)]
+enum OutputFormat {
+    Toml,
+    Json,
+    JsonPretty
 }
 
-fn decode_segment_header<R: Read>(input_file: &mut R, arguments: &ArgMatches) {
-    match SegmentHeader::decode_directly(input_file) {
-        // is_ok() if this file contains a segment header (without a main header).
-        Ok(header) => {
-            // Calling .unwrap() is safe here because this argument has a default value.
-            match arguments.value_of(CLAP_ARG_NAME_OUTPUT_FORMAT).unwrap() {
-                CLAP_ARG_VALUE_OUTPUT_FORMAT_TOML => match toml::Value::try_from(&header) {
-                    Ok(value) => {
-                        println!("{}", value);
-                        exit(EXIT_STATUS_SUCCESS);
-                    },
-                    Err(_) => {
-                        println!("{}", ERROR_SERIALIZE_TOML);
-                        exit(EXIT_STATUS_ERROR);
-                    }
-                },
-                CLAP_ARG_VALUE_OUTPUT_FORMAT_JSON => match serde_json::to_string(&header) {
-                    Ok(value) => {
-                        println!("{}", value);
-                        exit(EXIT_STATUS_SUCCESS);
-                    },
-                    Err(_) => {
-                        println!("{}", ERROR_SERIALIZE_JSON);
-                        exit(EXIT_STATUS_ERROR);
-                    }
-                },
-                CLAP_ARG_VALUE_OUTPUT_FORMAT_JSON_PRETTY => match serde_json::to_string_pretty(&header) {
-                    Ok(value) => {
-                        println!("{}", value);
-                        exit(EXIT_STATUS_SUCCESS);
-                    },
-                    Err(_) => {
-                        println!("{}", ERROR_SERIALIZE_JSON);
-                        exit(EXIT_STATUS_ERROR);
-                    }
-                }
-                _ => {
-                    println!("{}", ERROR_SERIALIZE_UNKNOWN_SERIALIZER);
-                    exit(EXIT_STATUS_ERROR);
-                }
-            }
-        },
-        Err(e) => {
-            println!("{}{}", ERROR_PARSE_SEGMENT_HEADER, e.to_string());
-            exit(EXIT_STATUS_ERROR);
-        }
-    }
+enum HeaderType {
+    MainHeaderV1(MainHeaderV1),
+    MainHeaderV2(MainHeaderV2),
+    SegmentHeaderV1(SegmentHeaderV1),
+    SegmentHeaderV2(SegmentHeaderV2),
 }
-
-fn decode_main_header_encrypted<R: Read>(input_file: &mut R, arguments: &ArgMatches) {
-    let password = match arguments.value_of(CLAP_ARG_NAME_PASSWORD) {
-        Some(pw) => pw,
-        None => {
-            println!("{}", ERROR_NO_PASSWORD);
-            exit(EXIT_STATUS_ERROR);
-        }
-    };
-    match MainHeader::decode_encrypted_header_with_password(input_file, password) {
-        // is_ok() if this file contains an encrypted (well formatted) main header and the password is correct.
-        Ok(header) => {
-            // Calling .unwrap() is safe here because this argument has a default value.
-            match arguments.value_of(CLAP_ARG_NAME_OUTPUT_FORMAT).unwrap() {
-                CLAP_ARG_VALUE_OUTPUT_FORMAT_TOML => match toml::Value::try_from(&header) {
-                    Ok(value) => {
-                        println!("{}", value);
-                        exit(EXIT_STATUS_SUCCESS);
-                    },
-                    Err(_) => {
-                        println!("{}", ERROR_SERIALIZE_TOML);
-                        exit(EXIT_STATUS_ERROR);
-                    }
-                },
-                CLAP_ARG_VALUE_OUTPUT_FORMAT_JSON => match serde_json::to_string(&header) {
-                    Ok(value) => {
-                        println!("{}", value);
-                        exit(EXIT_STATUS_SUCCESS);
-                    },
-                    Err(_) => {
-                        println!("{}", ERROR_SERIALIZE_JSON);
-                        exit(EXIT_STATUS_ERROR);
-                    }
-                },
-                CLAP_ARG_VALUE_OUTPUT_FORMAT_JSON_PRETTY => match serde_json::to_string_pretty(&header) {
-                    Ok(value) => {
-                        println!("{}", value);
-                        exit(EXIT_STATUS_SUCCESS);
-                    },
-                    Err(_) => {
-                        println!("{}", ERROR_SERIALIZE_JSON);
-                        exit(EXIT_STATUS_ERROR);
-                    }
-                }
-                _ => {
-                    println!("{}", ERROR_SERIALIZE_UNKNOWN_SERIALIZER);
-                    exit(EXIT_STATUS_ERROR);
-                }
-            }
-        },
-        Err(e) => match e.get_kind() {
-            ZffErrorKind::PKCS5CryptoError => {
-                println!("{}{}", ERROR_PARSE_ENCRYPTED_MAIN_HEADER, ERROR_WRONG_PASSWORD);
-                exit(EXIT_STATUS_ERROR);
-            },
-            _ => {
-                println!("{}{}", ERROR_PARSE_ENCRYPTED_MAIN_HEADER, e.to_string());
-                exit(EXIT_STATUS_ERROR);
-            }
-        }
-    }
-}
-
-fn create_zff_reader<R: Read + Seek, P: AsRef<[u8]>>(mut data: Vec<R>, password: Option<P>) -> Result<ZffReader<R>> {
-    if let Some(password) = password {
-        let main_header = match MainHeader::decode_directly(&mut data[0]) {
-            Ok(header) => header,
-            Err(e) => match e.get_kind() {
-                ZffErrorKind::HeaderDecodeMismatchIdentifier => {
-                    data[0].rewind()?;
-                    MainHeader::decode_encrypted_header_with_password(&mut data[0], &password)?
-                },
-                _ => return Err(e),
-            },
-        };
-        let mut zff_reader = ZffReader::new(data, main_header)?;
-        zff_reader.decrypt_encryption_key(password)?;
-        return Ok(zff_reader);
-    } else {
-        let main_header = MainHeader::decode_directly(&mut data[0])?;
-        if let Some(_) = main_header.encryption_header() {
-            return Err(ZffError::new(ZffErrorKind::MissingEncryptionKey, ERROR_MISSING_ENCRYPTION_KEY));
-        };
-        let zff_reader = ZffReader::new(data, main_header)?;
-        Ok(zff_reader)
-    }
-}
-
-fn get_input_files(arguments: &ArgMatches) -> Vec<File> {
-    // Calling .unwrap() is safe here because the arguments are *required*.
-    let mut input_file_paths = Vec::new();
-    let input_filename = PathBuf::from(arguments.value_of(CLAP_ARG_NAME_INPUT_FILE).unwrap());
-    let input_path = match PathBuf::from(&input_filename).parent() {
-        Some(p) => {
-            if p.to_string_lossy() == "" {
-                match read_dir(PWD) {
-                    Ok(iter) => iter,
-                    Err(e) => {
-                        println!("{}{}", ERROR_UNREADABLE_INPUT_DIR, e.to_string());
-                        exit(EXIT_STATUS_ERROR);
-                    }
-                }
-            } else {
-                match read_dir(p) {
-                    Ok(iter) => iter,
-                    Err(e) => {
-                        println!("{}{}", ERROR_UNREADABLE_INPUT_DIR, e.to_string());
-                        exit(EXIT_STATUS_ERROR);
-                    }
-                }
-            }
-        }
-        None => {
-            println!("{}", ERROR_UNDETERMINABLE_INPUT_DIR);
-            exit(EXIT_STATUS_ERROR);
-        }
-    };
-    for filename in input_path {
-        match filename {
-            Ok(n) if n.path().is_file() => {
-                if n.path().file_stem() == input_filename.file_stem() {
-                    input_file_paths.push(n.path());
-                }
-            }
-            _ => ()
-        }
-    }
-
-    input_file_paths.sort();
-    let mut input_files = Vec::new();
-    for path in input_file_paths {
-        let segment_file = match File::open(&path) {
-            Ok(file) => file,
-            Err(_) => {
-                println!("{}{}", ERROR_OPEN_INPUT_FILE, path.to_string_lossy());
-                exit(EXIT_STATUS_ERROR);
-            }
-        };
-        input_files.push(segment_file);
-    }
-
-    input_files
-}
-
-fn get_zff_reader(arguments: &ArgMatches, header_signature: &HeaderSignature, input_files: Vec<File>) -> ZffReader<File>{
-    let zff_reader = match header_signature {
-        HeaderSignature::EncryptedMainHeader => {
-            let password = match arguments.value_of(CLAP_ARG_NAME_PASSWORD) {
-                Some(pw) => pw,
-                None => {
-                    println!("{}", ERROR_NO_PASSWORD);
-                    exit(EXIT_STATUS_ERROR);
-                }
-            };
-
-            let mut zff_reader = match create_zff_reader(input_files, Some(password)) {
-                Ok(reader) => reader,
-                Err(e) => {
-                    println!("{}{}", ERROR_START_ANALYSIS, e.to_string());
-                    exit(EXIT_STATUS_ERROR);
-                },
-            };
-
-            match zff_reader.decrypt_encryption_key(password.trim()) {
-                Ok(_) => (),
-                Err(_) => {
-                    println!("{}{}", ERROR_PARSE_ENCRYPTED_MAIN_HEADER, ERROR_WRONG_PASSWORD);
-                    exit(EXIT_STATUS_ERROR);
-                }
-            };
-
-            zff_reader
-        },
-        _ => {
-            match create_zff_reader(input_files, None::<String>) {
-                Ok(reader) => reader,
-                Err(e) => {
-                    println!("{}{}", ERROR_START_ANALYSIS, e.to_string());
-                    exit(EXIT_STATUS_ERROR);
-                },
-            }
-        },
-    };
-    zff_reader
-}
-
-fn check_integrity(arguments: &ArgMatches, header_signature: &HeaderSignature) {
-    let input_files = get_input_files(arguments);
-    let zff_reader = get_zff_reader(arguments, header_signature, input_files);
-
-    let hash_values = zff_reader.main_header().hash_header().hash_values();
-    let mut handles = Vec::new();
-    for value in hash_values {
-        let value = value.clone();
-        let input_files = get_input_files(arguments);
-        let zff_reader = get_zff_reader(arguments, header_signature, input_files);
-        handles.push(thread::spawn(move || {
-            check_integrity_for_hash_value(value, zff_reader);
-        }));
-    }
-    for handle in handles {
-        match handle.join() {
-            Ok(_) => (),
-            Err(_) => {
-                println!("{}", HASHING_THREAD_PANIC);
-                exit(EXIT_STATUS_ERROR);
-            }
-        };
-    }
-    exit(EXIT_STATUS_SUCCESS);
-}
-
-fn check_integrity_for_hash_value(value: HashValue, mut zff_reader: ZffReader<File>) {
-    let chunk_size = zff_reader.main_header().chunk_size();
-    let mut hasher = Hash::new_hasher(value.hash_type());
-    let mut buffer = vec![0u8; chunk_size];
-        loop {
-            let count = match zff_reader.read(&mut buffer){
-                Ok(x) => x,
-                Err(e) => {
-                    println!("{}{}", ERROR_HASHING_DATA, e.to_string());
-                    exit(EXIT_STATUS_ERROR);
-                },
-            };
-            if count == 0 {
-                break;
-            }
-            hasher.update(&buffer[..count]);
-        }
-        let hash = hasher.finalize();
-    if value.hash() == &hash.to_vec() {
-        println!("{}{}", value.hash_type().to_string(), CORRECT_HASH)
-    } else {
-        println!("{}{}", value.hash_type().to_string(), INCORRECT_HASH)
-    }
-}
-
-fn verify_image(arguments: &ArgMatches, header_signature: &HeaderSignature) {
-    let input_files = get_input_files(arguments);
-
-    let mut public_key = [0; ED25519_DALEK_PUBKEY_LEN];
-    // Calling .unwrap() is safe here because the arguments are *required*.
-    let path = &arguments.value_of(CLAP_ARG_NAME_PUBKEYFILE).unwrap();
-    let mut file_content = match read_lines(&path) {
-        Ok(content) => content,
-        Err(_) => {
-            println!("{}{}", ERROR_OPEN_FILE_PUBKEY, &path);
-            exit(EXIT_STATUS_ERROR);
-        }
-    };
-    let base64_encoded_pubkey = match file_content.next() {
-        Some(Ok(line)) => line,
-        _ => {
-            println!("{}{}", ERROR_DECODE_BASE64_PUBKEY, ERROR_EMPTY_FILE);
-            exit(EXIT_STATUS_ERROR);
-        }
-    };
-    let decoded_key = match base64::decode(base64_encoded_pubkey.trim()) {
-        Ok(key) => key,
-        Err(e) => {
-            println!("{}{}", ERROR_DECODE_BASE64_PUBKEY, e.to_string());
-            exit(EXIT_STATUS_ERROR);
-        }
-    };
-    match decoded_key.as_slice().read_exact(&mut public_key) {
-        Ok(_) => (),
-        Err(e) => {
-            println!("{}{}", ERROR_READ_PUBKEY, e.to_string());
-            exit(EXIT_STATUS_ERROR);
-        }
-    };    
-
-    let mut zff_reader = get_zff_reader(arguments, header_signature, input_files);
-
-    match zff_reader.verify_all(public_key, false) {
-        Ok(vec) => {
-            if vec.len() == 0 {
-                println!("{}", VERIFIER_RESULT_SUCCESS);
-                exit(EXIT_STATUS_SUCCESS);
-            } else {
-                println!("{}", VERIFIER_RESULT_CORRUPTION_FOUND);
-                for chunk_no in vec {
-                    println!("{}", chunk_no);
-                }
-                exit(EXIT_STATUS_SUCCESS);
-            }
-        },
-        Err(e) => {
-            println!("{}{}", VERIFIER_RESULT_ERROR, e.to_string());
-            exit(EXIT_STATUS_ERROR);
-        }
-    }
-}
-
-// The output is wrapped in a Result to allow matching on errors
-// Returns an Iterator to the Reader of the lines of the file.
-fn read_lines<P>(filename: P) -> io::Result<io::Lines<io::BufReader<File>>>
-where P: AsRef<Path>, {
-    let file = File::open(filename)?;
-    Ok(io::BufReader::new(file).lines())
-}
-            
 
 fn main() {
-    let arguments = arguments();
-
-    // Calling .unwrap() is safe here because the arguments are *required*.
-    let input_path = PathBuf::from(arguments.value_of(CLAP_ARG_NAME_INPUT_FILE).unwrap());
-    let mut input_file = match File::open(input_path) {
-        Ok(file) => file,
-        Err(_) => {
-            println!("{}", ERROR_OPEN_INPUT_FILE);
-            exit(EXIT_STATUS_ERROR);
+    let args = Cli::parse();
+    let mut files = HashMap::new(); //<file number of .zXX file, std::file::File>
+    let mut file_numbers = Vec::new(); //zff file numbers
+    let mut segments_map = HashMap::new(); // <segment number, file number of .zXX file>
+    let mut file_number = 0; // file number of .zXX file
+    let mut logical_object_footer_map = HashMap::new(); // <object number, logical object footer>
+    for inputfile in &args.inputfile {
+        match File::open(&inputfile) {
+            Ok(file) => {
+                files.insert(file_number, file);
+                file_numbers.push(file_number);
+                file_number +=1;
+            },
+            Err(err_msg) => {
+                println!("{ERROR_OPEN_INPUT_FILE}{err_msg}");
+                exit(EXIT_STATUS_ERROR);
+            }
         }
     };
 
-    let mut header_signature = [0u8; 4];
-    match input_file.read_exact(&mut header_signature) {
-        Ok(_) => (),
-        Err(e) => {
-            println!("{}: {}", ERROR_FILE_READ, e.to_string());
-            exit(EXIT_STATUS_ERROR);
+    let mut information: HashMap<i64, Vec<Information>> = HashMap::new();
+    for file_number in file_numbers {
+        // - unwrap should be safe here, because we have filled the map and the vector above with the correct file numbers.
+        let file = files.get_mut(&file_number).unwrap();
+        let header_type = match get_header(file, &args) {
+            Ok(ht) => ht,
+            Err(err_msg) => {
+                println!("{ERROR_FILE_READ}{err_msg}");
+                exit(EXIT_STATUS_ERROR);
+            }
+        };
+        match header_type {
+            HeaderType::MainHeaderV1(main_header) => {
+                let unique_identifier = main_header.unique_identifier();
+
+                let first_segment_header = match SegmentHeaderV1::decode_directly(file) {
+                    Ok(header) => header,
+                    Err(e) => {
+                        println!("{ERROR_DECODE_SEGMENT_HEADER}1\n{e}");
+                        exit(EXIT_STATUS_ERROR);
+                    }
+                };
+                let segment_information = match get_segment_information_v1(&args, file, first_segment_header) {
+                    Ok(seg_info) => seg_info,
+                    Err(e) => {
+                        println!("{ERROR_GET_SEGMENT_INFORMATION_V1}{e}");
+                        exit(EXIT_STATUS_ERROR);
+                    }
+                };
+
+                let compression_information = CompressionInformation {
+                    algorithm: main_header.compression_header().algorithm().clone(),
+                    level: *main_header.compression_header().level(),
+                    threshold: main_header.compression_header().threshold(),
+                };
+                let main_information = MainInformationV1 {
+                    chunk_size: main_header.chunk_size() as u64,
+                    signature_flag: main_header.has_signature(),
+                    segment_size: main_header.segment_size(),
+                    number_of_segments: main_header.number_of_segments(),
+                    length_of_data: main_header.length_of_data(),
+                    compression_information: compression_information,
+                    segment_information: segment_information,
+                };
+
+                match information.get_mut(&unique_identifier) {
+                    Some(data) => data.push(Information::MainInformationV1(main_information)),
+                    None => { 
+                        information.insert(unique_identifier, Vec::new());
+                        information.get_mut(&unique_identifier).unwrap().push(Information::MainInformationV1(main_information));
+                    },
+                };
+            },
+            HeaderType::SegmentHeaderV1(segment_header) => {
+                let unique_identifier = segment_header.unique_identifier();
+                let segment_information = match get_segment_information_v1(&args, file, segment_header) {
+                    Ok(seg_info) => seg_info,
+                    Err(e) => {
+                        println!("{ERROR_GET_SEGMENT_INFORMATION_V1}{e}");
+                        exit(EXIT_STATUS_ERROR);
+                    }
+                };
+                match information.get_mut(&unique_identifier) {
+                    Some(data) => data.push(Information::SegmentInformation(segment_information)),
+                    None => { 
+                        information.insert(unique_identifier, Vec::new());
+                        information.get_mut(&unique_identifier).unwrap().push(Information::SegmentInformation(segment_information));
+                    },
+                };
+            }
+            HeaderType::MainHeaderV2(main_header) => {
+                let unique_identifier = main_header.unique_identifier();
+                // First segment
+                let first_segment_header = match SegmentHeaderV2::decode_directly(file) {
+                    Ok(header) => header,
+                    Err(e) => {
+                        println!("{ERROR_DECODE_SEGMENT_HEADER}2\n{e}");
+                        exit(EXIT_STATUS_ERROR);
+                    }
+                };
+                segments_map.insert(first_segment_header.segment_number(), file_number);
+                let segment_information = match get_segment_information_v2(&args, file, first_segment_header, &mut information, &mut logical_object_footer_map) {
+                    Ok(seg_info) => seg_info,
+                    Err(e) => {
+                        println!("{ERROR_GET_SEGMENT_INFORMATION_V2}{e}");
+                        exit(EXIT_STATUS_ERROR);
+                    }
+                };
+                // - MainHeader
+                let main_information = MainHeaderInformationV2 {
+                    chunk_size: main_header.chunk_size() as u64,
+                    segment_size: main_header.segment_size(),
+                    segment_information: segment_information,
+                };
+                match information.get_mut(&unique_identifier) {
+                    Some(data) => data.push(Information::MainHeaderInformationV2(main_information)),
+                    None => { 
+                        information.insert(unique_identifier, Vec::new());
+                        information.get_mut(&unique_identifier).unwrap().push(Information::MainHeaderInformationV2(main_information));
+                    },
+                };
+                // - MainFooter
+                match get_main_footer(file) {
+                    Ok(main_footer) => {
+                        let main_footer_information = MainFooterInformation {
+                            number_of_segments: main_footer.number_of_segments(),
+                            description_notes: main_footer.description_notes().map(|s| s.to_string()),
+                        };
+                        match information.get_mut(&unique_identifier) {
+                            Some(data) => data.push(Information::MainFooterInformation(main_footer_information)),
+                            None => { 
+                                information.insert(unique_identifier, Vec::new());
+                                information.get_mut(&unique_identifier).unwrap().push(Information::MainFooterInformation(main_footer_information));
+                            },
+                        };
+                    },
+                    Err(_) => ()
+                }
+            }
+            HeaderType::SegmentHeaderV2(segment_header) => {
+                let unique_identifier = segment_header.unique_identifier();
+                segments_map.insert(segment_header.segment_number(), file_number);
+                let segment_information = match get_segment_information_v2(&args, file, segment_header, &mut information, &mut logical_object_footer_map) {
+                    Ok(seg_info) => seg_info,
+                    Err(e) => {
+                        println!("{ERROR_GET_SEGMENT_INFORMATION_V2}{e}");
+                        exit(EXIT_STATUS_ERROR);
+                    }
+                };
+
+                match get_main_footer(file) {
+                    Ok(main_footer) => {
+                        let main_footer_information = MainFooterInformation {
+                            number_of_segments: main_footer.number_of_segments(),
+                            description_notes: main_footer.description_notes().map(|s| s.to_string()),
+                        };
+                        match information.get_mut(&unique_identifier) {
+                            Some(data) => data.push(Information::MainFooterInformation(main_footer_information)),
+                            None => { 
+                                information.insert(unique_identifier, Vec::new());
+                                information.get_mut(&unique_identifier).unwrap().push(Information::MainFooterInformation(main_footer_information));
+                            },
+                        };
+                    },
+                    Err(_) => ()
+                }
+
+                match information.get_mut(&unique_identifier) {
+                    Some(data) => data.push(Information::SegmentInformation(segment_information)),
+                    None => { 
+                        information.insert(unique_identifier, Vec::new());
+                        information.get_mut(&unique_identifier).unwrap().push(Information::SegmentInformation(segment_information));
+                    },
+                };
+            }
+        }
+    }
+
+    for (object_number, logical_object_footer) in &logical_object_footer_map {
+        let mut object_footer_information_logical = ObjectFooterInformationLogical {
+            object_number: *object_number,
+            file_header_map: HashMap::new(),
+            file_footer_map: HashMap::new(),
+        };
+        for (file_number, segment_number) in logical_object_footer.file_header_segment_numbers() {
+             //TODO: Error handling if verbose mode=on - or logging to STDERR?
+            if let Some(offset) = logical_object_footer.file_header_offsets().get(file_number) {
+                //TODO: Error handling if verbose mode=on? - or logging to STDERR?
+                if let Some(zff_file_number) = segments_map.get(segment_number) {
+                    //TODO: Error handling if verbose mode=on? - or logging to STDERR? with match and continue?
+                    if let Some(file) = files.get_mut(zff_file_number) {
+                        //TODO: Error handling if verbose mode=on? - or logging to STDERR? with match and continue?
+                        if let Ok(file_header_information) = get_file_header_information(file, *offset) {
+                            object_footer_information_logical.file_header_map.insert(*file_number, file_header_information);
+                        }
+                            
+                    }
+                }
+            }
+        }
+        for (file_number, segment_number) in logical_object_footer.file_footer_segment_numbers() {
+             //TODO: Error handling if verbose mode=on - or logging to STDERR?
+            if let Some(offset) = logical_object_footer.file_footer_offsets().get(file_number) {
+                //TODO: Error handling if verbose mode=on? - or logging to STDERR?
+                if let Some(zff_file_number) = segments_map.get(segment_number) {
+                    //TODO: Error handling if verbose mode=on? - or logging to STDERR? with match and continue?
+                    if let Some(file) = files.get_mut(zff_file_number) {
+                        //TODO: Error handling if verbose mode=on? - or logging to STDERR? with match and continue?
+                        if let Ok(file_footer_information) = get_file_footer_information(file, *offset) {
+                            object_footer_information_logical.file_footer_map.insert(*file_number, file_footer_information);
+                        }
+                            
+                    }
+                }
+            }
+        }
+    }
+
+    match args.output_format {
+        OutputFormat::Toml => match toml::Value::try_from(&information) {
+            Ok(value) => {
+                println!("{}", value);
+                exit(EXIT_STATUS_SUCCESS);
+            },
+            Err(e) => {
+                println!("{ERROR_SERIALIZE_TOML}{e}");
+                exit(EXIT_STATUS_ERROR);
+            }
         },
-    };
-    match input_file.rewind() {
-        Ok(_) => (),
-        Err(e) => {
-            println!("{}: {}", ERROR_FILE_READ, e.to_string());
-            exit(EXIT_STATUS_ERROR);
-        }
-    };
-
-    let header_signature = if u32::from_be_bytes(header_signature) == MainHeader::identifier() {
-        HeaderSignature::MainHeader
-    } else if u32::from_be_bytes(header_signature) == SegmentHeader::identifier() {
-        HeaderSignature::SegmentHeader
-    } else if u32::from_be_bytes(header_signature) == MainHeader::encrypted_header_identifier() {
-        HeaderSignature::EncryptedMainHeader
-    } else {
-        println!("{}", ERROR_UNKNOWN_HEADER);
-        exit(EXIT_STATUS_ERROR);
-    };
-
-    if arguments.is_present(CLAP_ARG_NAME_VERIFY) {
-        verify_image(&arguments, &header_signature)
+        OutputFormat::Json => match serde_json::to_string(&information) {
+            Ok(value) => {
+                println!("{}", value);
+                exit(EXIT_STATUS_SUCCESS);
+            },
+            Err(e) => {
+                println!("{ERROR_SERIALIZE_JSON}{e}");
+                exit(EXIT_STATUS_ERROR);
+            }
+        },
+        OutputFormat::JsonPretty => match serde_json::to_string_pretty(&information) {
+            Ok(value) => {
+                println!("{}", value);
+                exit(EXIT_STATUS_SUCCESS);
+            },
+            Err(e) => {
+                println!("{ERROR_SERIALIZE_JSON}{e}");
+                exit(EXIT_STATUS_ERROR);
+            }
+        },
     }
-    if arguments.is_present(CLAP_ARG_NAME_INTEGRITY_CHECK) {
-        check_integrity(&arguments, &header_signature)
-    }
-
-    match header_signature {
-        HeaderSignature::MainHeader => decode_main_header_unencrypted(&mut input_file, &arguments),
-        HeaderSignature::SegmentHeader => decode_segment_header(&mut input_file, &arguments),
-        HeaderSignature::EncryptedMainHeader => decode_main_header_encrypted(&mut input_file, &arguments)
-    }
-
-       
 }
 
-enum HeaderSignature {
-    MainHeader,
-    SegmentHeader,
-    EncryptedMainHeader,
+fn get_main_footer(file: &mut File) -> Result<MainFooter> {
+    file.seek(SeekFrom::End(-8))?;
+    let footer_offset = u64::decode_directly(file)?;
+    file.seek(SeekFrom::Start(footer_offset))?;
+    let main_footer = MainFooter::decode_directly(file)?;
+    Ok(main_footer)
+}
+
+fn get_object_header_information(file: &mut File, offset: u64) -> Result<ObjectHeaderInformation> {
+    file.seek(SeekFrom::Start(offset))?;
+    let object_header = ObjectHeader::decode_directly(file)?;
+    let compression_information = CompressionInformation {
+        algorithm: object_header.compression_header().algorithm().clone(),
+        level: *object_header.compression_header().level(),
+        threshold: object_header.compression_header().threshold(),
+    };
+    let object_header_information = ObjectHeaderInformation {
+        object_number: object_header.object_number(),
+        compression_information: compression_information,
+        object_type: object_header.object_type()
+    };
+    Ok(object_header_information)
+}
+
+fn get_object_footer_information_physical(file: &mut File, offset: u64, object_number: u64) -> Result<ObjectFooterInformationPhysical> {
+    file.seek(SeekFrom::Start(offset))?;
+    let object_footer_physical = ObjectFooterPhysical::decode_directly(file)?;
+    let hash_information = hash_information_v2(object_footer_physical.hash_header());
+    let get_object_footer_information_physical = ObjectFooterInformationPhysical {
+        object_number: object_number,
+        acquisition_start: object_footer_physical.acquisition_start(),
+        acquisition_end: object_footer_physical.acquisition_end(),
+        length_of_data: object_footer_physical.length_of_data(),
+        number_of_chunks: object_footer_physical.number_of_chunks(),
+        hash_information: hash_information
+    };
+
+    Ok(get_object_footer_information_physical)
+}
+
+fn set_object_footer_information_logical(file: &mut File, offset: u64, object_number: u64, logical_object_footer_map: &mut HashMap<u64, ObjectFooterLogical>) -> Result<()> {
+    file.seek(SeekFrom::Start(offset))?;
+    let object_footer_logical = ObjectFooterLogical::decode_directly(file)?;
+    logical_object_footer_map.insert(object_number, object_footer_logical);
+    Ok(())
+}
+
+fn get_file_header_information(file: &mut File, offset: u64) -> Result<FileHeaderInformation> {
+    file.seek(SeekFrom::Start(offset))?;
+    let file_header = FileHeader::decode_directly(file)?;
+    Ok(FileHeaderInformation {
+        file_type: file_header.file_type(),
+        filename: file_header.filename().to_string(),
+        parent_file_number: file_header.parent_file_number(),
+        atime: file_header.atime(),
+        mtime: file_header.mtime(),
+        ctime: file_header.ctime(),
+        btime: file_header.btime(),
+        metadata_extended_information: file_header.metadata_ext().clone(),
+    })
+}
+fn get_file_footer_information(file: &mut File, offset: u64) -> Result<FileFooterInformation> {
+    file.seek(SeekFrom::Start(offset))?;
+    let file_footer = FileFooter::decode_directly(file)?;
+    Ok(FileFooterInformation{
+        acquisition_start: file_footer.acquisition_start(),
+        acquisition_end: file_footer.acquisition_end(),
+        hash_information: hash_information_v2(file_footer.hash_header()),
+        number_of_chunks: file_footer.number_of_chunks(),
+        length_of_data: file_footer.length_of_data()
+    })
+}
+
+fn hash_information_v2(hash_header: &HashHeaderV2) -> Vec<HashInformation> {
+    let mut hash_information_vec = Vec::new();
+    for hash_value in hash_header.hash_values() {
+        hash_information_vec.push(HashInformation{
+            hash_type: hash_value.hash_type().clone(),
+            hash: hash_value.hash().to_vec(),
+            ed25519_signature: hash_value.ed25519_signature()
+        })
+    }
+    hash_information_vec
+}
+
+fn get_segment_information_v2(
+    args: &Cli,
+    file: &mut File,
+    segment_header: SegmentHeaderV2,
+    global_information_map: &mut HashMap<i64, Vec<Information>>,
+    logical_object_footer_map: &mut HashMap<u64, ObjectFooterLogical>) -> Result<SegmentInformation> {
+    match get_main_footer(file) {
+        Ok(_) => {
+            file.seek(SeekFrom::End(-8))?;
+            let footer_offset = u64::decode_directly(file)?;
+            file.seek(SeekFrom::Start(footer_offset))?;
+            file.seek(SeekFrom::Current(-8))?
+        },
+        Err(_) => file.seek(SeekFrom::End(-8))?,
+    };
+    let footer_offset = u64::decode_directly(file)?;
+    file.seek(SeekFrom::Start(footer_offset))?;
+    let segment_footer = SegmentFooterV2::decode_directly(file)?;
+    let mut segment_information = SegmentInformation {
+        segment_number: segment_header.segment_number(),
+        length_of_segment: segment_footer.length_of_segment(),
+        chunk_information: Vec::new()
+    };
+    if args.verbose {
+        for (_, offset) in segment_footer.chunk_offsets() {
+            file.seek(SeekFrom::Start(*offset))?;
+            let chunk_header = ChunkHeaderV1::decode_directly(file)?;
+
+            let chunk_information = ChunkInformation {
+                chunk_number: chunk_header.chunk_number(),
+                chunk_size: *chunk_header.chunk_size(),
+                crc32: chunk_header.crc32(),
+                error_flag: chunk_header.error_flag(),
+                compression_flag: chunk_header.compression_flag(),
+                ed25519_signature: *chunk_header.signature(),
+            };
+
+            segment_information.chunk_information.push(chunk_information);
+        }
+    }
+    let unique_identifier = segment_header.unique_identifier();
+    // - ObjectHeader
+    for (_, offset) in segment_footer.object_header_offsets() {
+        match get_object_header_information(file, *offset) {
+            Ok(object_header_information) => {
+                match global_information_map.get_mut(&unique_identifier) {
+                    Some(data) => data.push(Information::ObjectHeaderInformation(object_header_information)),
+                    None => { 
+                        global_information_map.insert(unique_identifier, Vec::new());
+                        global_information_map.get_mut(&unique_identifier).unwrap().push(Information::ObjectHeaderInformation(object_header_information));
+                    },
+                };
+            },
+            Err(_) => ()
+        }
+    }
+    // - ObjectFooter
+    for (object_number, offset) in segment_footer.object_footer_offsets() {
+        match get_object_footer_information_physical(file, *offset, *object_number) {
+            Ok(object_footer_information) => {
+                match global_information_map.get_mut(&unique_identifier) {
+                    Some(data) => data.push(Information::ObjectFooterInformation(ObjectFooterInformation::Physical(object_footer_information))),
+                    None => { 
+                        global_information_map.insert(unique_identifier, Vec::new());
+                        global_information_map.get_mut(&unique_identifier).unwrap().push(Information::ObjectFooterInformation(ObjectFooterInformation::Physical(object_footer_information)));
+                    },
+                };
+            },
+            Err(_) => match set_object_footer_information_logical(file, *offset, *object_number, logical_object_footer_map) {
+                Ok(_) => (),
+                Err(_) => ()
+            }
+        }
+    }
+    
+    Ok(segment_information)
+}
+
+fn get_segment_information_v1(args: &Cli, file: &mut File, segment_header: SegmentHeaderV1) -> Result<SegmentInformation> {
+    let mut segment_information = SegmentInformation {
+        segment_number: segment_header.segment_number(),
+        length_of_segment: segment_header.length_of_segment(),
+        chunk_information: Vec::new()
+    };
+    if args.verbose {
+        file.seek(SeekFrom::Start(segment_header.footer_offset()))?;
+        let segment_footer = SegmentFooterV1::decode_directly(file)?;
+        for offset in segment_footer.chunk_offsets() {
+            file.seek(SeekFrom::Start(*offset))?;
+            let chunk_header = ChunkHeaderV1::decode_directly(file)?;
+
+            let chunk_information = ChunkInformation {
+                chunk_number: chunk_header.chunk_number(),
+                chunk_size: *chunk_header.chunk_size(),
+                crc32: chunk_header.crc32(),
+                error_flag: chunk_header.error_flag(),
+                compression_flag: chunk_header.compression_flag(),
+                ed25519_signature: *chunk_header.signature(),
+            };
+
+            segment_information.chunk_information.push(chunk_information);
+        }
+    }
+    Ok(segment_information)
+}
+
+fn get_header(inputfile: &mut File,  args: &Cli) -> Result<HeaderType> {
+    //read header signature and version
+    let mut header_signature = [0u8; HEADER_SIGNATURE_LENGTH];
+    let mut header_length = [0u8; HEADER_LENGTH_LENGTH];
+    let mut header_version = [0u8; HEADER_VERSION_LENGTH];
+    inputfile.read_exact(&mut header_signature)?;
+    inputfile.read_exact(&mut header_length)?;
+    inputfile.read_exact(&mut header_version)?;
+    inputfile.rewind()?;
+
+    match u32::from_be_bytes(header_signature) {
+        HEADER_IDENTIFIER_MAIN_HEADER => main_header(inputfile, u8::from_be_bytes(header_version)),
+        HEADER_IDENTIFIER_ENCRYPTED_MAIN_HEADER => match &args.decryption_password {
+            None => {
+                println!("{ERROR_DECRYPTION_PASSWORD_NEEDED}");
+                exit(EXIT_STATUS_ERROR);
+            },
+            Some(decryption_password) => return encrypted_main_header(inputfile, u8::from_be_bytes(header_version), decryption_password),
+        },
+        HEADER_IDENTIFIER_SEGMENT_HEADER => return segment_header(inputfile, u8::from_be_bytes(header_version)),
+        _ => {
+            println!("{ERROR_UNKNOWN_HEADER}");
+            exit(EXIT_STATUS_ERROR);
+        }
+    }
+}
+
+fn main_header(inputfile: &mut File, header_version: u8) -> Result<HeaderType> {
+    match header_version {
+        1 => match MainHeaderV1::decode_directly(inputfile) {
+            Ok(main_header) => return Ok(HeaderType::MainHeaderV1(main_header)),
+            Err(err_msg) => {
+                println!("{ERROR_PARSE_MAIN_HEADER}{err_msg}");
+                exit(EXIT_STATUS_ERROR);
+            }
+        },
+        2 => match MainHeaderV2::decode_directly(inputfile) {
+            Ok(main_header) => return Ok(HeaderType::MainHeaderV2(main_header)),
+            Err(err_msg) => {
+                println!("{ERROR_PARSE_MAIN_HEADER} {err_msg}");
+                exit(EXIT_STATUS_ERROR);
+            }
+        },
+        version @ _ => {
+            println!("{ERROR_UNSUPPORTED_ZFF_MAIN_HEADER_VERSION}{version}");
+            exit(EXIT_STATUS_ERROR);
+        },
+    }
+}
+
+fn encrypted_main_header<P: AsRef<[u8]>>(inputfile: &mut File, header_version: u8, decryption_password: P) -> Result<HeaderType> {
+    match header_version {
+        1 => {
+            match MainHeaderV1::decode_encrypted_header_with_password(inputfile, decryption_password) {
+                Ok(main_header) => return Ok(HeaderType::MainHeaderV1(main_header)),
+                Err(err) => {
+                    match err.get_kind() {
+                        ZffErrorKind::PKCS5CryptoError => println!("{ERROR_PARSE_ENCRYPTED_MAIN_HEADER}{ERROR_WRONG_PASSWORD}"),
+                        _ => println!("{ERROR_PARSE_ENCRYPTED_MAIN_HEADER}{err}"),
+                    };
+                    exit(EXIT_STATUS_ERROR);
+                }
+            }
+        },
+        2 => match MainHeaderV2::decode_directly(inputfile) {
+            Ok(main_header) => return Ok(HeaderType::MainHeaderV2(main_header)),
+            Err(err_msg) => {
+                println!("{ERROR_PARSE_MAIN_HEADER} {err_msg}");
+                exit(EXIT_STATUS_ERROR);
+            }
+        },
+        version @ _ => {
+            println!("{ERROR_UNSUPPORTED_ZFF_MAIN_HEADER_VERSION}{version}");
+            exit(EXIT_STATUS_ERROR);
+        },
+    }
+}
+
+fn segment_header(inputfile: &mut File, header_version: u8) -> Result<HeaderType> {
+    match header_version {
+        1 => match SegmentHeaderV1::decode_directly(inputfile) {
+            Ok(segment_header) => return Ok(HeaderType::SegmentHeaderV1(segment_header)),
+            Err(err_msg) => {
+                println!("{ERROR_PARSE_SEGMENT_HEADER}{err_msg}");
+                exit(EXIT_STATUS_ERROR);
+            }
+        },
+        2 => match SegmentHeaderV2::decode_directly(inputfile) {
+            Ok(segment_header) => return Ok(HeaderType::SegmentHeaderV2(segment_header)),
+            Err(err_msg) => {
+                println!("{ERROR_PARSE_SEGMENT_HEADER}{err_msg}");
+                exit(EXIT_STATUS_ERROR);
+            }
+        },
+        version @ _ => {
+            println!("{ERROR_UNSUPPORTED_ZFF_SEGMENT_HEADER_VERSION}{version}");
+            exit(EXIT_STATUS_ERROR);
+        }
+    }
 }
