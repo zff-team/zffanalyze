@@ -1,8 +1,8 @@
-name: zffmetareader
-adopt-info: zffmetareader
+name: zffanalyze
+adopt-info: zffanalyze
 summary: Tool to analyze and verify zff files.
 description: |
-  zffmetareader is used analyze and verify zff files.
+  zffanalyze is used analyze and verify zff files.
 
   Zff (Z forensic file format) is a completley new designed file format to store and handle the contents and structure 
   of a partial or entire disk image or physical memory. The focus of zff is on speed, security and modularity in concert 
@@ -11,10 +11,10 @@ description: |
 base: core20
 confinement: strict
 parts:
-  zffmetareader:
+  zffanalyze:
     build-packages: [ gcc ]
     plugin: rust
-    source: https://github.com/ph0llux/zffmetareader.git
+    source: https://github.com/ph0llux/zffanalyze.git
     override-pull: |
       snapcraftctl pull
       VERSION="$(git describe --tags --abbrev=0)"
@@ -22,7 +22,7 @@ parts:
       snapcraftctl set-version "$VERSION"
       snapcraftctl set-grade "$GRADE"
 apps:
-  zffmetareader:
-    command: bin/zffmetareader
+  zffanalyze:
+    command: bin/zffanalyze
 architectures:
   - build-on: [amd64,arm64]
