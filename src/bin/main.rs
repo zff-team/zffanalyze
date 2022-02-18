@@ -18,10 +18,10 @@ use lib::constants::*;
 use zff::{
     Result,
     constants::*,
-    version1::header::{MainHeader as MainHeaderV1, SegmentHeader as SegmentHeaderV1, ChunkHeader as ChunkHeaderV1},
-    version1::footer::{SegmentFooter as SegmentFooterV1},
-    version2::header::{MainHeader as MainHeaderV2, SegmentHeader as SegmentHeaderV2, ObjectHeader, FileHeader, HashHeader as HashHeaderV2},
-    version2::footer::{SegmentFooter as SegmentFooterV2, MainFooter, ObjectFooterPhysical, ObjectFooterLogical, FileFooter, },
+    header::version1::{MainHeader as MainHeaderV1, SegmentHeader as SegmentHeaderV1, ChunkHeader as ChunkHeaderV1},
+    footer::version1::{SegmentFooter as SegmentFooterV1},
+    header::version2::{MainHeader as MainHeaderV2, SegmentHeader as SegmentHeaderV2, ObjectHeader, FileHeader, HashHeader as HashHeaderV2},
+    footer::version2::{SegmentFooter as SegmentFooterV2, MainFooter, ObjectFooterPhysical, ObjectFooterLogical, FileFooter},
     ValueDecoder,
     HeaderCoding,
     ZffErrorKind,
@@ -36,7 +36,7 @@ struct Cli {
 
     /// The input files. This should be your zff image files. You can use this Option multiple times.
     #[clap(short='i', long="inputfiles")]
-    inputfile: Vec<String>,
+    inputfiles: Vec<String>,
 
     /// The output format.
     #[clap(short='f', long="output-format", arg_enum, default_value="toml")]
@@ -82,8 +82,8 @@ fn main() {
     let mut file_numbers = Vec::new(); //zff file numbers
     let mut segments_map = HashMap::new(); // <segment number, file number of .zXX file>
     let mut file_number = 0; // file number of .zXX file
-    let mut logical_object_footer_map = HashMap::new(); // <object number, logical object footer>
-    for inputfile in &args.inputfile {
+    let mut logical_object_footer_map = HashMap::new(); // <unique identifier, <object number, logical object footer>>
+    for inputfile in &args.inputfiles {
         match File::open(&inputfile) {
             Ok(file) => {
                 files.insert(file_number, file);
@@ -91,20 +91,21 @@ fn main() {
                 file_number +=1;
             },
             Err(err_msg) => {
-                println!("{ERROR_OPEN_INPUT_FILE}{err_msg}");
+                eprintln!("{ERROR_OPEN_INPUT_FILE}{err_msg}");
                 exit(EXIT_STATUS_ERROR);
             }
         }
     };
 
     let mut information: HashMap<i64, Vec<Information>> = HashMap::new();
+
     for file_number in file_numbers {
         // - unwrap should be safe here, because we have filled the map and the vector above with the correct file numbers.
         let file = files.get_mut(&file_number).unwrap();
         let header_type = match get_header(file, &args) {
             Ok(ht) => ht,
             Err(err_msg) => {
-                println!("{ERROR_FILE_READ}{err_msg}");
+                eprintln!("{ERROR_FILE_READ}{err_msg}");
                 exit(EXIT_STATUS_ERROR);
             }
         };
@@ -115,20 +116,20 @@ fn main() {
                 let first_segment_header = match SegmentHeaderV1::decode_directly(file) {
                     Ok(header) => header,
                     Err(e) => {
-                        println!("{ERROR_DECODE_SEGMENT_HEADER}1\n{e}");
+                        eprintln!("{ERROR_DECODE_SEGMENT_HEADER}1\n{e}");
                         exit(EXIT_STATUS_ERROR);
                     }
                 };
                 let segment_information = match get_segment_information_v1(&args, file, first_segment_header) {
                     Ok(seg_info) => seg_info,
                     Err(e) => {
-                        println!("{ERROR_GET_SEGMENT_INFORMATION_V1}{e}");
+                        eprintln!("{ERROR_GET_SEGMENT_INFORMATION_V1}{e}");
                         exit(EXIT_STATUS_ERROR);
                     }
                 };
 
                 let compression_information = CompressionInformation {
-                    algorithm: main_header.compression_header().algorithm().clone(),
+                    algorithm: CompressionAlgorithmInformation::from(main_header.compression_header().algorithm()),
                     level: *main_header.compression_header().level(),
                     threshold: main_header.compression_header().threshold(),
                 };
@@ -155,7 +156,7 @@ fn main() {
                 let segment_information = match get_segment_information_v1(&args, file, segment_header) {
                     Ok(seg_info) => seg_info,
                     Err(e) => {
-                        println!("{ERROR_GET_SEGMENT_INFORMATION_V1}{e}");
+                        eprintln!("{ERROR_GET_SEGMENT_INFORMATION_V1}{e}");
                         exit(EXIT_STATUS_ERROR);
                     }
                 };
@@ -173,7 +174,7 @@ fn main() {
                 let first_segment_header = match SegmentHeaderV2::decode_directly(file) {
                     Ok(header) => header,
                     Err(e) => {
-                        println!("{ERROR_DECODE_SEGMENT_HEADER}2\n{e}");
+                        eprintln!("{ERROR_DECODE_SEGMENT_HEADER}2\n{e}");
                         exit(EXIT_STATUS_ERROR);
                     }
                 };
@@ -181,7 +182,7 @@ fn main() {
                 let segment_information = match get_segment_information_v2(&args, file, first_segment_header, &mut information, &mut logical_object_footer_map) {
                     Ok(seg_info) => seg_info,
                     Err(e) => {
-                        println!("{ERROR_GET_SEGMENT_INFORMATION_V2}{e}");
+                        eprintln!("{ERROR_GET_SEGMENT_INFORMATION_V2}{e}");
                         exit(EXIT_STATUS_ERROR);
                     }
                 };
@@ -222,7 +223,7 @@ fn main() {
                 let segment_information = match get_segment_information_v2(&args, file, segment_header, &mut information, &mut logical_object_footer_map) {
                     Ok(seg_info) => seg_info,
                     Err(e) => {
-                        println!("{ERROR_GET_SEGMENT_INFORMATION_V2}{e}");
+                        eprintln!("{ERROR_GET_SEGMENT_INFORMATION_V2}{e}");
                         exit(EXIT_STATUS_ERROR);
                     }
                 };
@@ -243,7 +244,6 @@ fn main() {
                     },
                     Err(_) => ()
                 }
-
                 match information.get_mut(&unique_identifier) {
                     Some(data) => data.push(Information::SegmentInformation(segment_information)),
                     None => { 
@@ -254,8 +254,8 @@ fn main() {
             }
         }
     }
-
-    for (object_number, logical_object_footer) in &logical_object_footer_map {
+    for (unique_identifier, inner_logical_object_footer_map) in &logical_object_footer_map {
+       for (object_number, logical_object_footer) in inner_logical_object_footer_map {
         let mut object_footer_information_logical = ObjectFooterInformationLogical {
             object_number: *object_number,
             file_header_map: HashMap::new(),
@@ -277,6 +277,7 @@ fn main() {
                 }
             }
         }
+
         for (file_number, segment_number) in logical_object_footer.file_footer_segment_numbers() {
              //TODO: Error handling if verbose mode=on - or logging to STDERR?
             if let Some(offset) = logical_object_footer.file_footer_offsets().get(file_number) {
@@ -292,27 +293,41 @@ fn main() {
                     }
                 }
             }
+        }            match information.get_mut(&unique_identifier) {
+                Some(data) => data.push(Information::ObjectFooterInformationLogical(object_footer_information_logical)),
+                None => { 
+                    information.insert(*unique_identifier, Vec::new());
+                    information.get_mut(&unique_identifier).unwrap().push(Information::ObjectFooterInformationLogical(object_footer_information_logical));
+                },
+            }; 
         }
     }
 
     match args.output_format {
-        OutputFormat::Toml => match toml::Value::try_from(&information) {
-            Ok(value) => {
-                println!("{}", value);
-                exit(EXIT_STATUS_SUCCESS);
-            },
-            Err(e) => {
-                println!("{ERROR_SERIALIZE_TOML}{e}");
-                exit(EXIT_STATUS_ERROR);
+        OutputFormat::Toml => {
+            let mut stringified_hashmap = HashMap::new();
+            for (unique_identifier, value) in information.drain() {
+                stringified_hashmap.insert(unique_identifier.to_string(), value);
             }
+            match toml::Value::try_from(&stringified_hashmap) {
+                Ok(value) => {
+                    println!("{}", value);
+                    exit(EXIT_STATUS_SUCCESS);
+                },
+                Err(e) => {
+                    eprintln!("{ERROR_SERIALIZE_TOML}{e}");
+                    exit(EXIT_STATUS_ERROR);
+                }
+            };
         },
+    
         OutputFormat::Json => match serde_json::to_string(&information) {
             Ok(value) => {
                 println!("{}", value);
                 exit(EXIT_STATUS_SUCCESS);
             },
             Err(e) => {
-                println!("{ERROR_SERIALIZE_JSON}{e}");
+                eprintln!("{ERROR_SERIALIZE_JSON}{e}");
                 exit(EXIT_STATUS_ERROR);
             }
         },
@@ -322,7 +337,7 @@ fn main() {
                 exit(EXIT_STATUS_SUCCESS);
             },
             Err(e) => {
-                println!("{ERROR_SERIALIZE_JSON}{e}");
+                eprintln!("{ERROR_SERIALIZE_JSON}{e}");
                 exit(EXIT_STATUS_ERROR);
             }
         },
@@ -341,7 +356,7 @@ fn get_object_header_information(file: &mut File, offset: u64) -> Result<ObjectH
     file.seek(SeekFrom::Start(offset))?;
     let object_header = ObjectHeader::decode_directly(file)?;
     let compression_information = CompressionInformation {
-        algorithm: object_header.compression_header().algorithm().clone(),
+        algorithm: CompressionAlgorithmInformation::from(object_header.compression_header().algorithm()),
         level: *object_header.compression_header().level(),
         threshold: object_header.compression_header().threshold(),
     };
@@ -369,10 +384,21 @@ fn get_object_footer_information_physical(file: &mut File, offset: u64, object_n
     Ok(get_object_footer_information_physical)
 }
 
-fn set_object_footer_information_logical(file: &mut File, offset: u64, object_number: u64, logical_object_footer_map: &mut HashMap<u64, ObjectFooterLogical>) -> Result<()> {
+fn set_object_footer_information_logical(
+    unique_identifier: i64,
+    logical_object_footer_map: &mut HashMap<i64, HashMap<u64, ObjectFooterLogical>>, // <unique identifier, <object number, object footer>
+    file: &mut File,
+    offset: u64,
+    object_number: u64) -> Result<()> {
     file.seek(SeekFrom::Start(offset))?;
     let object_footer_logical = ObjectFooterLogical::decode_directly(file)?;
-    logical_object_footer_map.insert(object_number, object_footer_logical);
+    match logical_object_footer_map.get_mut(&unique_identifier) {
+        Some(inner_map) => { inner_map.insert(object_number, object_footer_logical); },
+        None => {
+            logical_object_footer_map.insert(unique_identifier, HashMap::new());
+            logical_object_footer_map.get_mut(&unique_identifier).unwrap().insert(object_number, object_footer_logical);
+        },
+    }
     Ok(())
 }
 
@@ -419,7 +445,8 @@ fn get_segment_information_v2(
     file: &mut File,
     segment_header: SegmentHeaderV2,
     global_information_map: &mut HashMap<i64, Vec<Information>>,
-    logical_object_footer_map: &mut HashMap<u64, ObjectFooterLogical>) -> Result<SegmentInformation> {
+    logical_object_footer_map: &mut HashMap<i64, HashMap<u64, ObjectFooterLogical>> //<unique identifier, <object number, logical footer>>
+    ) -> Result<SegmentInformation> {
     match get_main_footer(file) {
         Ok(_) => {
             file.seek(SeekFrom::End(-8))?;
@@ -467,7 +494,9 @@ fn get_segment_information_v2(
                     },
                 };
             },
-            Err(_) => ()
+            Err(e) => {
+                eprintln!("Error: get_object_header_information: {e}");
+            }
         }
     }
     // - ObjectFooter
@@ -475,16 +504,18 @@ fn get_segment_information_v2(
         match get_object_footer_information_physical(file, *offset, *object_number) {
             Ok(object_footer_information) => {
                 match global_information_map.get_mut(&unique_identifier) {
-                    Some(data) => data.push(Information::ObjectFooterInformation(ObjectFooterInformation::Physical(object_footer_information))),
+                    Some(data) => data.push(Information::ObjectFooterInformationPhysical(object_footer_information)),
                     None => { 
                         global_information_map.insert(unique_identifier, Vec::new());
-                        global_information_map.get_mut(&unique_identifier).unwrap().push(Information::ObjectFooterInformation(ObjectFooterInformation::Physical(object_footer_information)));
+                        global_information_map.get_mut(&unique_identifier).unwrap().push(Information::ObjectFooterInformationPhysical(object_footer_information));
                     },
                 };
             },
-            Err(_) => match set_object_footer_information_logical(file, *offset, *object_number, logical_object_footer_map) {
+            Err(_) => match set_object_footer_information_logical(unique_identifier, logical_object_footer_map, file, *offset, *object_number) {
                 Ok(_) => (),
-                Err(_) => ()
+                Err(e) => {
+                    eprintln!("Error: set_object_footer_information_logical: {e}");
+                }
             }
         }
     }
@@ -534,14 +565,14 @@ fn get_header(inputfile: &mut File,  args: &Cli) -> Result<HeaderType> {
         HEADER_IDENTIFIER_MAIN_HEADER => main_header(inputfile, u8::from_be_bytes(header_version)),
         HEADER_IDENTIFIER_ENCRYPTED_MAIN_HEADER => match &args.decryption_password {
             None => {
-                println!("{ERROR_DECRYPTION_PASSWORD_NEEDED}");
+                eprintln!("{ERROR_DECRYPTION_PASSWORD_NEEDED}");
                 exit(EXIT_STATUS_ERROR);
             },
             Some(decryption_password) => return encrypted_main_header(inputfile, u8::from_be_bytes(header_version), decryption_password),
         },
         HEADER_IDENTIFIER_SEGMENT_HEADER => return segment_header(inputfile, u8::from_be_bytes(header_version)),
         _ => {
-            println!("{ERROR_UNKNOWN_HEADER}");
+            eprintln!("{ERROR_UNKNOWN_HEADER}");
             exit(EXIT_STATUS_ERROR);
         }
     }
@@ -552,19 +583,19 @@ fn main_header(inputfile: &mut File, header_version: u8) -> Result<HeaderType> {
         1 => match MainHeaderV1::decode_directly(inputfile) {
             Ok(main_header) => return Ok(HeaderType::MainHeaderV1(main_header)),
             Err(err_msg) => {
-                println!("{ERROR_PARSE_MAIN_HEADER}{err_msg}");
+                eprintln!("{ERROR_PARSE_MAIN_HEADER}{err_msg}");
                 exit(EXIT_STATUS_ERROR);
             }
         },
         2 => match MainHeaderV2::decode_directly(inputfile) {
             Ok(main_header) => return Ok(HeaderType::MainHeaderV2(main_header)),
             Err(err_msg) => {
-                println!("{ERROR_PARSE_MAIN_HEADER} {err_msg}");
+                eprintln!("{ERROR_PARSE_MAIN_HEADER} {err_msg}");
                 exit(EXIT_STATUS_ERROR);
             }
         },
         version @ _ => {
-            println!("{ERROR_UNSUPPORTED_ZFF_MAIN_HEADER_VERSION}{version}");
+            eprintln!("{ERROR_UNSUPPORTED_ZFF_MAIN_HEADER_VERSION}{version}");
             exit(EXIT_STATUS_ERROR);
         },
     }
@@ -587,12 +618,12 @@ fn encrypted_main_header<P: AsRef<[u8]>>(inputfile: &mut File, header_version: u
         2 => match MainHeaderV2::decode_directly(inputfile) {
             Ok(main_header) => return Ok(HeaderType::MainHeaderV2(main_header)),
             Err(err_msg) => {
-                println!("{ERROR_PARSE_MAIN_HEADER} {err_msg}");
+                eprintln!("{ERROR_PARSE_MAIN_HEADER} {err_msg}");
                 exit(EXIT_STATUS_ERROR);
             }
         },
         version @ _ => {
-            println!("{ERROR_UNSUPPORTED_ZFF_MAIN_HEADER_VERSION}{version}");
+            eprintln!("{ERROR_UNSUPPORTED_ZFF_MAIN_HEADER_VERSION}{version}");
             exit(EXIT_STATUS_ERROR);
         },
     }
@@ -603,19 +634,19 @@ fn segment_header(inputfile: &mut File, header_version: u8) -> Result<HeaderType
         1 => match SegmentHeaderV1::decode_directly(inputfile) {
             Ok(segment_header) => return Ok(HeaderType::SegmentHeaderV1(segment_header)),
             Err(err_msg) => {
-                println!("{ERROR_PARSE_SEGMENT_HEADER}{err_msg}");
+                eprintln!("{ERROR_PARSE_SEGMENT_HEADER}{err_msg}");
                 exit(EXIT_STATUS_ERROR);
             }
         },
         2 => match SegmentHeaderV2::decode_directly(inputfile) {
             Ok(segment_header) => return Ok(HeaderType::SegmentHeaderV2(segment_header)),
             Err(err_msg) => {
-                println!("{ERROR_PARSE_SEGMENT_HEADER}{err_msg}");
+                eprintln!("{ERROR_PARSE_SEGMENT_HEADER}{err_msg}");
                 exit(EXIT_STATUS_ERROR);
             }
         },
         version @ _ => {
-            println!("{ERROR_UNSUPPORTED_ZFF_SEGMENT_HEADER_VERSION}{version}");
+            eprintln!("{ERROR_UNSUPPORTED_ZFF_SEGMENT_HEADER_VERSION}{version}");
             exit(EXIT_STATUS_ERROR);
         }
     }

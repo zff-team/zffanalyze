@@ -12,19 +12,101 @@ pub mod traits;
 // - internal
 use zff::{
 	HashType,
-	version2::header::{ObjectType, FileType},
+	header::version2::{ObjectType, FileType},
 	CompressionAlgorithm,
 };
+use crate::constants::*;
 use traits::*;
 
-#[derive(Serialize)]
 pub enum Information {
     MainInformationV1(MainInformationV1),
     SegmentInformation(SegmentInformation),
     MainHeaderInformationV2(MainHeaderInformationV2),
     MainFooterInformation(MainFooterInformation),
     ObjectHeaderInformation(ObjectHeaderInformation),
-    ObjectFooterInformation(ObjectFooterInformation),
+    ObjectFooterInformationLogical(ObjectFooterInformationLogical),
+    ObjectFooterInformationPhysical(ObjectFooterInformationPhysical),
+}
+
+impl Serialize for Information {
+    fn serialize<S>(&self, serializer: S) -> std::result::Result<S::Ok, S::Error>
+    where
+        S: Serializer,
+    {
+        let mut state = serializer.serialize_struct("Information", 6)?;
+        match self {
+            Information::MainInformationV1(main) => state.serialize_field("Main", &main)?,
+            Information::SegmentInformation(seg) => state.serialize_field("Segment", &seg)?,
+            Information::MainHeaderInformationV2(main) => state.serialize_field("Main", &main)?,
+            Information::MainFooterInformation(main) => state.serialize_field("Main", &main)?,
+            Information::ObjectHeaderInformation(obj_header) => state.serialize_field("Object", &obj_header)?,
+            Information::ObjectFooterInformationLogical(obj_footer) => state.serialize_field("Object", &obj_footer)?,
+            Information::ObjectFooterInformationPhysical(obj_footer) => state.serialize_field("Object", &obj_footer)?,
+        }
+        state.end()
+    }
+}
+
+#[derive(Serialize)]
+pub enum CompressionAlgorithmInformation {
+    None,
+    Zstd,
+    Lz4,
+    Unimplemented,
+}
+
+impl From<&CompressionAlgorithm> for CompressionAlgorithmInformation {
+    fn from(algo: &CompressionAlgorithm) -> Self {
+        match algo {
+            CompressionAlgorithm::None => CompressionAlgorithmInformation::None,
+            CompressionAlgorithm::Zstd => CompressionAlgorithmInformation::Zstd,
+            CompressionAlgorithm::Lz4 => CompressionAlgorithmInformation::Lz4,
+            _ => {
+                eprintln!("{ERROR_UNIMPLEMENTED_COMPRESSION_ALGORITHM}");
+                CompressionAlgorithmInformation::Unimplemented
+            },           
+        }
+    
+    }
+}
+
+#[derive(Serialize)]
+pub enum FileTypeInformation {
+    File,
+    Directory,
+    Symlink,
+    Hardlink,
+    Unimplemented,
+}
+
+impl From<&FileType> for FileTypeInformation {
+    fn from(file_type: &FileType) -> Self {
+        match file_type {
+            FileType::File => FileTypeInformation::File,
+            FileType::Directory => FileTypeInformation::Directory,
+            FileType::Symlink => FileTypeInformation::Symlink,
+            FileType::Hardlink => FileTypeInformation::Hardlink,
+            _ => {
+                eprintln!("{ERROR_UNIMPLEMENTED_FILETYPE}");
+                FileTypeInformation::Unimplemented
+            }, 
+        }
+    }
+}
+
+#[derive(Serialize)]
+pub enum ObjectTypeInformation {
+    Physical,
+    Logical,
+}
+
+impl From<&ObjectType> for ObjectTypeInformation {
+    fn from(object_type: &ObjectType) -> Self {
+        match object_type {
+            ObjectType::Physical => ObjectTypeInformation::Physical,
+            ObjectType::Logical => ObjectTypeInformation::Logical,              
+        }
+    }
 }
 
 // - version 1 header
@@ -103,12 +185,6 @@ pub struct MainFooterInformation {
     pub description_notes: Option<String>,
 }
 
-#[derive(Serialize)]
-pub enum ObjectFooterInformation {
-    Physical(ObjectFooterInformationPhysical),
-    Logical(ObjectFooterInformationLogical),
-}
-
 pub struct ObjectHeaderInformation {
     pub object_number: u64,
     //TODO: add other parts like encryption header.
@@ -126,7 +202,7 @@ impl Serialize for ObjectHeaderInformation {
         let mut state = serializer.serialize_struct("ObjectHeaderInformation", 6)?;
         state.serialize_field("object number", &self.object_number)?;
         state.serialize_field("compression_information", &self.compression_information)?;
-        state.serialize_field("object type", &self.object_type)?;
+        state.serialize_field("object type", &ObjectTypeInformation::from(&self.object_type))?;
         state.end()
     }
 }
@@ -206,7 +282,7 @@ impl Serialize for ObjectFooterInformationLogical {
         };
 
         state.serialize_field("file header", &stringified_file_header_map)?;
-        state.serialize_field("file header", &stringified_file_footer_map)?;
+        state.serialize_field("file footer", &stringified_file_footer_map)?;
 
         state.end()
     }
@@ -233,7 +309,7 @@ impl Serialize for FileHeaderInformation {
 
         let mut state = serializer.serialize_struct("FileHeaderInformation", 6)?;
 
-        state.serialize_field("file type", &self.file_type)?;
+        state.serialize_field("file type", &FileTypeInformation::from(&self.file_type))?;
 		state.serialize_field("filename", &self.filename)?;
 		state.serialize_field("parent file number", &self.parent_file_number)?;
 
@@ -287,6 +363,7 @@ impl Serialize for FileHeaderInformation {
     }
 }
 
+#[derive(Debug)]
 pub struct FileFooterInformation {
     pub acquisition_start: u64,
     pub acquisition_end: u64,
@@ -337,11 +414,12 @@ impl Serialize for FileFooterInformation {
 
 #[derive(Serialize)]
 pub struct CompressionInformation {
-    pub algorithm: CompressionAlgorithm,
+    pub algorithm: CompressionAlgorithmInformation,
     pub level: u8,
     pub threshold: f32
 }
 
+#[derive(Debug)]
 pub struct HashInformation {
     pub hash_type: HashType,
     pub hash: Vec<u8>,

@@ -5,7 +5,6 @@ pub(crate) const ERROR_UNKNOWN_HEADER: &str = "Could not read header of this fil
 
 pub(crate) const ERROR_SERIALIZE_TOML: &str = "An error occurred while trying to serialize the decoded information to toml format: ";
 pub(crate) const ERROR_SERIALIZE_JSON: &str = "An error occurred while trying to serialize the decoded information to json format: ";
-pub(crate) const ERROR_SERIALIZE_UNKNOWN_SERIALIZER: &str = "Unknown output format.";
 
 pub(crate) const ERROR_PARSE_MAIN_HEADER: &str = "An error occurred while trying to parse the main header: ";
 pub(crate) const ERROR_PARSE_ENCRYPTED_MAIN_HEADER: &str = "An error occurred while trying to parse the (encrypted) main header: ";
@@ -17,12 +16,8 @@ pub(crate) const ERROR_DECRYPTION_PASSWORD_NEEDED: &str = "Password is needed to
 pub(crate) const ERROR_DECODE_SEGMENT_HEADER: &str = "Error while trying to decode segment header: ";
 pub(crate) const ERROR_GET_SEGMENT_INFORMATION_V1: &str = "Error while trying to parse segment information for zff segment v1: ";
 pub(crate) const ERROR_GET_SEGMENT_INFORMATION_V2: &str = "Error while trying to parse segment information for zff segment v2: ";
+pub(crate) const ERROR_UNIMPLEMENTED_COMPRESSION_ALGORITHM: &str = "An error occurred while trying to interpret the compression algorithm. The used algorithm is currently not supported by zffanalyze.";
+pub(crate) const ERROR_UNIMPLEMENTED_FILETYPE: &str = "An error occurred while trying to interpret the file type. The used file type is currently not supported by zffanalyze.";
 
 pub(crate) const EXIT_STATUS_ERROR: i32 = 1;
 pub(crate) const EXIT_STATUS_SUCCESS: i32 = 0;
-
-
-// verifier results
-pub(crate) const VERIFIER_RESULT_SUCCESS: &'static str = "The data of the image is valid";
-pub(crate) const VERIFIER_RESULT_CORRUPTION_FOUND: &'static str = "Corrupted data chunks found. The following chunks (listet by chunk numbers) are NOT valid:";
-pub(crate) const VERIFIER_RESULT_ERROR: &'static str = "An error occurred while trying to verify the data: ";
