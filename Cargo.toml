@@ -1,14 +1,14 @@
 [package]
 name = "zffanalyze"
 authors = ["ph0llux <ph0llux@pm.me>"]
-version = "0.10.1"
+version = "1.0.0-beta"
 edition = "2021"
-rust-version = "1.56.1"
+rust-version = "1.58.1"
 license = "MIT OR Apache-2.0"
 description = "A command line utility to analyze zff files."
 homepage = "https://github.com/ph0llux/zffanalyze"
 repository = "https://github.com/ph0llux/zffanalyze"
-keywords = ["forensics", "security", "acquisition", "file-format", "file"]
+keywords = ["forensics", "security", "file-format", "file"]
 categories = ["command-line-utilities"]
 publish = true
 
@@ -20,7 +20,7 @@ bench = true
 
 [dependencies]
 clap = { version="3.0.5", features=[ "derive" ] }
-zff = { path="../../Projekte/zff" }
+zff = { version="2.0.0-alpha" }
 base64 = "0.13.0"
 serde = { version = "1.0", features = ["derive"] }
 hex = "0.4.3"
