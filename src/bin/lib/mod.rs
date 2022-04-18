@@ -39,9 +39,9 @@ impl Serialize for Information {
             Information::SegmentInformation(seg) => state.serialize_field("Segment", &seg)?,
             Information::MainHeaderInformationV2(main) => state.serialize_field("Main", &main)?,
             Information::MainFooterInformation(main) => state.serialize_field("Main", &main)?,
-            Information::ObjectHeaderInformation(obj_header) => state.serialize_field("Object", &obj_header)?,
-            Information::ObjectFooterInformationLogical(obj_footer) => state.serialize_field("Object", &obj_footer)?,
-            Information::ObjectFooterInformationPhysical(obj_footer) => state.serialize_field("Object", &obj_footer)?,
+            Information::ObjectHeaderInformation(obj_header) => state.serialize_field("ObjectHeader", &obj_header)?,
+            Information::ObjectFooterInformationLogical(obj_footer) => state.serialize_field("ObjectFooterLogical", &obj_footer)?,
+            Information::ObjectFooterInformationPhysical(obj_footer) => state.serialize_field("ObjectFooterPhysical", &obj_footer)?,
         }
         state.end()
     }
