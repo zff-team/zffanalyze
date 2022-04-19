@@ -70,7 +70,7 @@ enum OutputFormat {
 }
 
 enum HeaderType {
-    MainHeaderV1(MainHeaderV1),
+    MainHeaderV1(Box<MainHeaderV1>),
     MainHeaderV2(MainHeaderV2),
     SegmentHeaderV1(SegmentHeaderV1),
     SegmentHeaderV2(SegmentHeaderV2),
@@ -139,8 +139,8 @@ fn main() {
                     segment_size: main_header.segment_size(),
                     number_of_segments: main_header.number_of_segments(),
                     length_of_data: main_header.length_of_data(),
-                    compression_information: compression_information,
-                    segment_information: segment_information,
+                    compression_information,
+                    segment_information,
                 };
 
                 match information.get_mut(&unique_identifier) {
@@ -190,7 +190,7 @@ fn main() {
                 let main_information = MainHeaderInformationV2 {
                     chunk_size: main_header.chunk_size() as u64,
                     segment_size: main_header.segment_size(),
-                    segment_information: segment_information,
+                    segment_information,
                 };
                 match information.get_mut(&unique_identifier) {
                     Some(data) => data.push(Information::MainHeaderInformationV2(main_information)),
@@ -200,21 +200,18 @@ fn main() {
                     },
                 };
                 // - MainFooter
-                match get_main_footer(file) {
-                    Ok(main_footer) => {
-                        let main_footer_information = MainFooterInformation {
-                            number_of_segments: main_footer.number_of_segments(),
-                            description_notes: main_footer.description_notes().map(|s| s.to_string()),
-                        };
-                        match information.get_mut(&unique_identifier) {
-                            Some(data) => data.push(Information::MainFooterInformation(main_footer_information)),
-                            None => { 
-                                information.insert(unique_identifier, Vec::new());
-                                information.get_mut(&unique_identifier).unwrap().push(Information::MainFooterInformation(main_footer_information));
-                            },
-                        };
-                    },
-                    Err(_) => ()
+                if let Ok(main_footer) = get_main_footer(file) {
+                    let main_footer_information = MainFooterInformation {
+                        number_of_segments: main_footer.number_of_segments(),
+                        description_notes: main_footer.description_notes().map(|s| s.to_string()),
+                    };
+                    match information.get_mut(&unique_identifier) {
+                        Some(data) => data.push(Information::MainFooterInformation(main_footer_information)),
+                        None => { 
+                            information.insert(unique_identifier, Vec::new());
+                            information.get_mut(&unique_identifier).unwrap().push(Information::MainFooterInformation(main_footer_information));
+                        },
+                    };
                 }
             }
             HeaderType::SegmentHeaderV2(segment_header) => {
@@ -228,21 +225,18 @@ fn main() {
                     }
                 };
 
-                match get_main_footer(file) {
-                    Ok(main_footer) => {
-                        let main_footer_information = MainFooterInformation {
-                            number_of_segments: main_footer.number_of_segments(),
-                            description_notes: main_footer.description_notes().map(|s| s.to_string()),
-                        };
-                        match information.get_mut(&unique_identifier) {
-                            Some(data) => data.push(Information::MainFooterInformation(main_footer_information)),
-                            None => { 
-                                information.insert(unique_identifier, Vec::new());
-                                information.get_mut(&unique_identifier).unwrap().push(Information::MainFooterInformation(main_footer_information));
-                            },
-                        };
-                    },
-                    Err(_) => ()
+                if let Ok(main_footer) = get_main_footer(file) {
+                    let main_footer_information = MainFooterInformation {
+                        number_of_segments: main_footer.number_of_segments(),
+                        description_notes: main_footer.description_notes().map(|s| s.to_string()),
+                    };
+                    match information.get_mut(&unique_identifier) {
+                        Some(data) => data.push(Information::MainFooterInformation(main_footer_information)),
+                        None => { 
+                            information.insert(unique_identifier, Vec::new());
+                            information.get_mut(&unique_identifier).unwrap().push(Information::MainFooterInformation(main_footer_information));
+                        },
+                    };
                 }
                 match information.get_mut(&unique_identifier) {
                     Some(data) => data.push(Information::SegmentInformation(segment_information)),
@@ -293,11 +287,11 @@ fn main() {
                     }
                 }
             }
-        }            match information.get_mut(&unique_identifier) {
+        }            match information.get_mut(unique_identifier) {
                 Some(data) => data.push(Information::ObjectFooterInformationLogical(object_footer_information_logical)),
                 None => { 
                     information.insert(*unique_identifier, Vec::new());
-                    information.get_mut(&unique_identifier).unwrap().push(Information::ObjectFooterInformationLogical(object_footer_information_logical));
+                    information.get_mut(unique_identifier).unwrap().push(Information::ObjectFooterInformationLogical(object_footer_information_logical));
                 },
             }; 
         }
@@ -362,7 +356,7 @@ fn get_object_header_information(file: &mut File, offset: u64) -> Result<ObjectH
     };
     let object_header_information = ObjectHeaderInformation {
         object_number: object_header.object_number(),
-        compression_information: compression_information,
+        compression_information,
         object_type: object_header.object_type()
     };
     Ok(object_header_information)
@@ -373,12 +367,12 @@ fn get_object_footer_information_physical(file: &mut File, offset: u64, object_n
     let object_footer_physical = ObjectFooterPhysical::decode_directly(file)?;
     let hash_information = hash_information_v2(object_footer_physical.hash_header());
     let get_object_footer_information_physical = ObjectFooterInformationPhysical {
-        object_number: object_number,
+        object_number,
         acquisition_start: object_footer_physical.acquisition_start(),
         acquisition_end: object_footer_physical.acquisition_end(),
         length_of_data: object_footer_physical.length_of_data(),
         number_of_chunks: object_footer_physical.number_of_chunks(),
-        hash_information: hash_information
+        hash_information
     };
 
     Ok(get_object_footer_information_physical)
@@ -465,7 +459,7 @@ fn get_segment_information_v2(
         chunk_information: Vec::new()
     };
     if args.verbose {
-        for (_, offset) in segment_footer.chunk_offsets() {
+        for offset in segment_footer.chunk_offsets().values() {
             file.seek(SeekFrom::Start(*offset))?;
             let chunk_header = ChunkHeaderV1::decode_directly(file)?;
 
@@ -483,7 +477,7 @@ fn get_segment_information_v2(
     }
     let unique_identifier = segment_header.unique_identifier();
     // - ObjectHeader
-    for (_, offset) in segment_footer.object_header_offsets() {
+    for offset in segment_footer.object_header_offsets().values() {
         match get_object_header_information(file, *offset) {
             Ok(object_header_information) => {
                 match global_information_map.get_mut(&unique_identifier) {
@@ -561,40 +555,41 @@ fn get_header(inputfile: &mut File,  args: &Cli) -> Result<HeaderType> {
     inputfile.read_exact(&mut header_version)?;
     inputfile.rewind()?;
 
-    match u32::from_be_bytes(header_signature) {
-        HEADER_IDENTIFIER_MAIN_HEADER => main_header(inputfile, u8::from_be_bytes(header_version)),
-        HEADER_IDENTIFIER_ENCRYPTED_MAIN_HEADER => match &args.decryption_password {
+    if u32::from_be_bytes(header_signature) == HEADER_IDENTIFIER_MAIN_HEADER {
+        main_header(inputfile, u8::from_be_bytes(header_version))
+    } else if u32::from_be_bytes(header_signature) == HEADER_IDENTIFIER_ENCRYPTED_MAIN_HEADER {
+        match &args.decryption_password {
             None => {
                 eprintln!("{ERROR_DECRYPTION_PASSWORD_NEEDED}");
                 exit(EXIT_STATUS_ERROR);
             },
-            Some(decryption_password) => return encrypted_main_header(inputfile, u8::from_be_bytes(header_version), decryption_password),
-        },
-        HEADER_IDENTIFIER_SEGMENT_HEADER => return segment_header(inputfile, u8::from_be_bytes(header_version)),
-        _ => {
-            eprintln!("{ERROR_UNKNOWN_HEADER}");
-            exit(EXIT_STATUS_ERROR);
+            Some(decryption_password) => encrypted_main_header(inputfile, u8::from_be_bytes(header_version), decryption_password),
         }
+    } else if u32::from_be_bytes(header_signature) == HEADER_IDENTIFIER_SEGMENT_HEADER {
+        segment_header(inputfile, u8::from_be_bytes(header_version))
+    } else {
+        eprintln!("{ERROR_UNKNOWN_HEADER}");
+        exit(EXIT_STATUS_ERROR);
     }
 }
 
 fn main_header(inputfile: &mut File, header_version: u8) -> Result<HeaderType> {
     match header_version {
         1 => match MainHeaderV1::decode_directly(inputfile) {
-            Ok(main_header) => return Ok(HeaderType::MainHeaderV1(main_header)),
+            Ok(main_header) => Ok(HeaderType::MainHeaderV1(Box::new(main_header))),
             Err(err_msg) => {
                 eprintln!("{ERROR_PARSE_MAIN_HEADER}{err_msg}");
                 exit(EXIT_STATUS_ERROR);
             }
         },
         2 => match MainHeaderV2::decode_directly(inputfile) {
-            Ok(main_header) => return Ok(HeaderType::MainHeaderV2(main_header)),
+            Ok(main_header) => Ok(HeaderType::MainHeaderV2(main_header)),
             Err(err_msg) => {
                 eprintln!("{ERROR_PARSE_MAIN_HEADER} {err_msg}");
                 exit(EXIT_STATUS_ERROR);
             }
         },
-        version @ _ => {
+        version => {
             eprintln!("{ERROR_UNSUPPORTED_ZFF_MAIN_HEADER_VERSION}{version}");
             exit(EXIT_STATUS_ERROR);
         },
@@ -605,7 +600,7 @@ fn encrypted_main_header<P: AsRef<[u8]>>(inputfile: &mut File, header_version: u
     match header_version {
         1 => {
             match MainHeaderV1::decode_encrypted_header_with_password(inputfile, decryption_password) {
-                Ok(main_header) => return Ok(HeaderType::MainHeaderV1(main_header)),
+                Ok(main_header) => Ok(HeaderType::MainHeaderV1(Box::new(main_header))),
                 Err(err) => {
                     match err.get_kind() {
                         ZffErrorKind::PKCS5CryptoError => println!("{ERROR_PARSE_ENCRYPTED_MAIN_HEADER}{ERROR_WRONG_PASSWORD}"),
@@ -616,13 +611,13 @@ fn encrypted_main_header<P: AsRef<[u8]>>(inputfile: &mut File, header_version: u
             }
         },
         2 => match MainHeaderV2::decode_directly(inputfile) {
-            Ok(main_header) => return Ok(HeaderType::MainHeaderV2(main_header)),
+            Ok(main_header) => Ok(HeaderType::MainHeaderV2(main_header)),
             Err(err_msg) => {
                 eprintln!("{ERROR_PARSE_MAIN_HEADER} {err_msg}");
                 exit(EXIT_STATUS_ERROR);
             }
         },
-        version @ _ => {
+        version => {
             eprintln!("{ERROR_UNSUPPORTED_ZFF_MAIN_HEADER_VERSION}{version}");
             exit(EXIT_STATUS_ERROR);
         },
@@ -632,20 +627,20 @@ fn encrypted_main_header<P: AsRef<[u8]>>(inputfile: &mut File, header_version: u
 fn segment_header(inputfile: &mut File, header_version: u8) -> Result<HeaderType> {
     match header_version {
         1 => match SegmentHeaderV1::decode_directly(inputfile) {
-            Ok(segment_header) => return Ok(HeaderType::SegmentHeaderV1(segment_header)),
+            Ok(segment_header) => Ok(HeaderType::SegmentHeaderV1(segment_header)),
             Err(err_msg) => {
                 eprintln!("{ERROR_PARSE_SEGMENT_HEADER}{err_msg}");
                 exit(EXIT_STATUS_ERROR);
             }
         },
         2 => match SegmentHeaderV2::decode_directly(inputfile) {
-            Ok(segment_header) => return Ok(HeaderType::SegmentHeaderV2(segment_header)),
+            Ok(segment_header) => Ok(HeaderType::SegmentHeaderV2(segment_header)),
             Err(err_msg) => {
                 eprintln!("{ERROR_PARSE_SEGMENT_HEADER}{err_msg}");
                 exit(EXIT_STATUS_ERROR);
             }
         },
-        version @ _ => {
+        version => {
             eprintln!("{ERROR_UNSUPPORTED_ZFF_SEGMENT_HEADER_VERSION}{version}");
             exit(EXIT_STATUS_ERROR);
         }

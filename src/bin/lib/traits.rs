@@ -12,8 +12,8 @@ impl HumanReadable for u64 {
 		while (size) >= DIVISOR.powf(current_multiplier) {
 			current_multiplier += 1.0;
 		}
-		humanreadable_size.push_str(&(format!("{:.2}", (size) / DIVISOR.powf(current_multiplier - 1.0))).to_string());
-		humanreadable_size.push_str(&(UNIT[(current_multiplier - 1.0) as usize].to_string()));
+		humanreadable_size.push_str(&(format!("{:.2}", (size) / DIVISOR.powf(current_multiplier - 1.0))));
+		humanreadable_size.push_str(UNIT[(current_multiplier - 1.0) as usize]);
 		humanreadable_size
 	}
 }
