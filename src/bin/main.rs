@@ -35,7 +35,7 @@ use clap::{Parser, ArgEnum};
 struct Cli {
 
     /// The input files. This should be your zff image files. You can use this Option multiple times.
-    #[clap(short='i', long="inputfiles")]
+    #[clap(short='i', long="inputfiles", multiple_values=true)]
     inputfiles: Vec<String>,
 
     /// The output format.
