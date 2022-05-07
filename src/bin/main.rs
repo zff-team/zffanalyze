@@ -477,7 +477,7 @@ fn get_segment_information_v2(
     }
     let unique_identifier = segment_header.unique_identifier();
     // - ObjectHeader
-    for offset in segment_footer.object_header_offsets().values() {
+    for (object_number, offset) in segment_footer.object_header_offsets() {
         match get_object_header_information(file, *offset) {
             Ok(object_header_information) => {
                 match global_information_map.get_mut(&unique_identifier) {
@@ -488,8 +488,9 @@ fn get_segment_information_v2(
                     },
                 };
             },
-            Err(e) => {
-                eprintln!("Error: get_object_header_information: {e}");
+            Err(e) => match e.get_kind() {
+                ZffErrorKind::HeaderDecodeEncryptedHeader => eprintln!("Warning: object header of object {object_number} is encrypted and not readable."),
+                _ => eprintln!("Error: get_object_header_information: {e}"),
             }
         }
     }
