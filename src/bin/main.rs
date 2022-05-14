@@ -354,10 +354,15 @@ fn get_object_header_information(file: &mut File, offset: u64) -> Result<ObjectH
         level: *object_header.compression_header().level(),
         threshold: object_header.compression_header().threshold(),
     };
+    let description_header_information = DescriptionHeaderInformation {
+        information: object_header.description_header().identifier_map().clone(),
+    };
     let object_header_information = ObjectHeaderInformation {
         object_number: object_header.object_number(),
         compression_information,
-        object_type: object_header.object_type()
+        signature_flag: object_header.signature_flag().clone(),
+        object_type: object_header.object_type(),
+        description_header: description_header_information,
     };
     Ok(object_header_information)
 }

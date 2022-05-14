@@ -1,5 +1,9 @@
 // - STD
+use std::str::FromStr;
 use std::collections::HashMap;
+
+// - internal
+use zff::{ZffError, ZffErrorKind, SignatureFlag};
 
 // - external
 use hex::ToHex;
@@ -17,6 +21,32 @@ use zff::{
 };
 use crate::constants::*;
 use traits::*;
+
+fn string_to_str(s: String) -> &'static str {
+  Box::leak(s.into_boxed_str())
+}
+
+pub enum PredefinedDescriptionHeaderInformationKeys {
+    CaseNumber,
+    EvidenceNumber,
+    ExaminerName,
+    Notes,
+}
+
+impl FromStr for PredefinedDescriptionHeaderInformationKeys {
+    type Err = ZffError;
+    
+    fn from_str(s: &str) -> Result<Self, Self::Err> {
+        match s {
+            "cn" => Ok(PredefinedDescriptionHeaderInformationKeys::CaseNumber),
+            "ev" => Ok(PredefinedDescriptionHeaderInformationKeys::EvidenceNumber),
+            "ex" => Ok(PredefinedDescriptionHeaderInformationKeys::ExaminerName),
+            "no" => Ok(PredefinedDescriptionHeaderInformationKeys::Notes),
+            _ => Err(ZffError::new(ZffErrorKind::Custom, s)),
+        }
+    }
+}
+
 
 pub enum Information {
     MainInformationV1(MainInformationV1),
@@ -39,9 +69,18 @@ impl Serialize for Information {
             Information::SegmentInformation(seg) => state.serialize_field("Segment", &seg)?,
             Information::MainHeaderInformationV2(main) => state.serialize_field("Main", &main)?,
             Information::MainFooterInformation(main) => state.serialize_field("Main", &main)?,
-            Information::ObjectHeaderInformation(obj_header) => state.serialize_field("ObjectHeader", &obj_header)?,
-            Information::ObjectFooterInformationLogical(obj_footer) => state.serialize_field("ObjectFooterLogical", &obj_footer)?,
-            Information::ObjectFooterInformationPhysical(obj_footer) => state.serialize_field("ObjectFooterPhysical", &obj_footer)?,
+            Information::ObjectHeaderInformation(obj_header) => {
+                let key = string_to_str(format!("ObjectHeader_{}", obj_header.object_number));
+                state.serialize_field(key, &obj_header)?
+            },
+            Information::ObjectFooterInformationLogical(obj_footer) => {
+                let key = string_to_str(format!("ObjectFooterLogical_{}", obj_footer.object_number));
+                state.serialize_field(key, &obj_footer)?
+            },
+            Information::ObjectFooterInformationPhysical(obj_footer) => {
+                let key = string_to_str(format!("ObjectFooterPhysical_{}", obj_footer.object_number));
+                state.serialize_field(key, &obj_footer)?
+            },
         }
         state.end()
     }
@@ -189,8 +228,8 @@ pub struct ObjectHeaderInformation {
     pub object_number: u64,
     //TODO: add other parts like encryption header.
     pub compression_information: CompressionInformation,
-    //signature_flag: u8, TODO
-    //TODO: description header
+    pub signature_flag: SignatureFlag,
+    pub description_header: DescriptionHeaderInformation,
     pub object_type: ObjectType,
 }
 
@@ -199,10 +238,30 @@ impl Serialize for ObjectHeaderInformation {
     where
         S: Serializer,
     {
+        
         let mut state = serializer.serialize_struct("ObjectHeaderInformation", 6)?;
         state.serialize_field("object number", &self.object_number)?;
         state.serialize_field("compression_information", &self.compression_information)?;
         state.serialize_field("object type", &ObjectTypeInformation::from(&self.object_type))?;
+        
+        let description_header_information = {
+            let mut new_map = HashMap::new();
+            for (key, value) in &self.description_header.information {
+                match PredefinedDescriptionHeaderInformationKeys::from_str(key) {
+                    Err(_) => { new_map.insert(key.to_string(), value); },
+                    Ok(key) => match key {
+                        PredefinedDescriptionHeaderInformationKeys::CaseNumber => { new_map.insert(String::from("case_number"), value); },
+                        PredefinedDescriptionHeaderInformationKeys::EvidenceNumber => { new_map.insert(String::from("evidence_number"), value); },
+                        PredefinedDescriptionHeaderInformationKeys::ExaminerName => { new_map.insert(String::from("examiner_name"), value); },
+                        PredefinedDescriptionHeaderInformationKeys::Notes => { new_map.insert(String::from("notes"), value); },
+                    },
+                }
+            }
+            new_map
+        };
+        state.serialize_field("description_information", &description_header_information)?;
+        state.serialize_field("signature_flag", &self.signature_flag.to_string())?;
+
         state.end()
     }
 }
@@ -213,7 +272,7 @@ pub struct ObjectFooterInformationPhysical {
     pub acquisition_end: u64,
     pub length_of_data: u64,
     pub number_of_chunks: u64,
-    pub hash_information: Vec<HashInformation>,   
+    pub hash_information: Vec<HashInformation>,
 }
 
 impl Serialize for ObjectFooterInformationPhysical {
@@ -254,6 +313,7 @@ impl Serialize for ObjectFooterInformationPhysical {
         for hash_info in &self.hash_information {
         	state.serialize_field("hash information", &hash_info)?;
         };
+
         state.end()
     }
 }
@@ -286,6 +346,10 @@ impl Serialize for ObjectFooterInformationLogical {
 
         state.end()
     }
+}
+
+pub struct DescriptionHeaderInformation {
+    pub information: HashMap<String, String>,
 }
 
 pub struct FileHeaderInformation {
