@@ -11,7 +11,7 @@ description: |
   promises high maintainability and scalability. Zff is an alternative to the ewf
   and aff file formats and is not compatible with them.
 base: core20
-confinement: strict
+confinement: classic
 parts:
   zffanalyze:
     build-packages: [ gcc ]
