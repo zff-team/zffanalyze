@@ -26,5 +26,7 @@ parts:
 apps:
   zffanalyze:
     command: bin/zffanalyze
+    plugs:
+      - home
 architectures:
   - build-on: [amd64,arm64]
