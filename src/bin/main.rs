@@ -47,9 +47,9 @@ struct Cli {
     verbose: bool,
 
     ///TODO: Implement
-    /// The password, if the file has an encrypted main header
-    #[clap(short='p', long="decryption-password")]
-    decryption_password: Option<String>,
+    /// The password(s), if the file(s) are encrypted. You can use this option multiple times to enter different passwords for different objects.
+    #[clap(short='p', long="decryption-password", multiple_values=true)]
+    decryption_passwords: Vec<String>,
 
     ///TODO: Implement
     /// The path to the file which contains the public key.
@@ -367,6 +367,27 @@ fn get_object_header_information(file: &mut File, offset: u64) -> Result<ObjectH
     Ok(object_header_information)
 }
 
+fn get_encrypted_object_header_information<P: Into<String>>(file: &mut File, offset: u64, decryption_password: P) -> Result<ObjectHeaderInformation> {
+    file.seek(SeekFrom::Start(offset))?;
+    let object_header = ObjectHeader::decode_encrypted_header_with_password(file, decryption_password.into())?;
+    let compression_information = CompressionInformation {
+        algorithm: CompressionAlgorithmInformation::from(object_header.compression_header().algorithm()),
+        level: *object_header.compression_header().level(),
+        threshold: object_header.compression_header().threshold(),
+    };
+    let description_header_information = DescriptionHeaderInformation {
+        information: object_header.description_header().identifier_map().clone(),
+    };
+    let object_header_information = ObjectHeaderInformation {
+        object_number: object_header.object_number(),
+        compression_information,
+        signature_flag: object_header.signature_flag().clone(),
+        object_type: object_header.object_type(),
+        description_header: description_header_information,
+    };
+    Ok(object_header_information)
+}
+
 fn get_object_footer_information_physical(file: &mut File, offset: u64, object_number: u64) -> Result<ObjectFooterInformationPhysical> {
     file.seek(SeekFrom::Start(offset))?;
     let object_footer_physical = ObjectFooterPhysical::decode_directly(file)?;
@@ -494,7 +515,27 @@ fn get_segment_information_v2(
                 };
             },
             Err(e) => match e.get_kind() {
-                ZffErrorKind::HeaderDecodeEncryptedHeader => eprintln!("Warning: object header of object {object_number} is encrypted and not readable."),
+                ZffErrorKind::HeaderDecodeEncryptedHeader => {
+                    let mut decrypted = false;
+                    for password in &args.decryption_passwords {
+                        match get_encrypted_object_header_information(file, *offset, password) {
+                            Ok(object_header_information) => {
+                                decrypted = true;
+                                match global_information_map.get_mut(&unique_identifier) {
+                                    Some(data) => data.push(Information::ObjectHeaderInformation(object_header_information)),
+                                    None => {
+                                        global_information_map.insert(unique_identifier, Vec::new());
+                                        global_information_map.get_mut(&unique_identifier).unwrap().push(Information::ObjectHeaderInformation(object_header_information));
+                                    },
+                                }
+                            }
+                            Err(_) => continue,
+                        }
+                    }
+                    if !decrypted {
+                       eprintln!("Warning: object header of object {object_number} is encrypted and not readable.") 
+                    };
+                },
                 _ => eprintln!("Error: get_object_header_information: {e}"),
             }
         }
@@ -564,13 +605,12 @@ fn get_header(inputfile: &mut File,  args: &Cli) -> Result<HeaderType> {
     if u32::from_be_bytes(header_signature) == HEADER_IDENTIFIER_MAIN_HEADER {
         main_header(inputfile, u8::from_be_bytes(header_version))
     } else if u32::from_be_bytes(header_signature) == HEADER_IDENTIFIER_ENCRYPTED_MAIN_HEADER {
-        match &args.decryption_password {
-            None => {
-                eprintln!("{ERROR_DECRYPTION_PASSWORD_NEEDED}");
-                exit(EXIT_STATUS_ERROR);
-            },
-            Some(decryption_password) => encrypted_main_header(inputfile, u8::from_be_bytes(header_version), decryption_password),
-        }
+        if args.decryption_passwords.len() as u64 != 1 {
+            eprintln!("{ERROR_DECRYPTION_PASSWORD_NEEDED}");
+            exit(EXIT_STATUS_ERROR);
+        };
+        let decryption_password = &args.decryption_passwords[0]; 
+        encrypted_main_header(inputfile, u8::from_be_bytes(header_version), decryption_password)
     } else if u32::from_be_bytes(header_signature) == HEADER_IDENTIFIER_SEGMENT_HEADER {
         segment_header(inputfile, u8::from_be_bytes(header_version))
     } else {
