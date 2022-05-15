@@ -16,7 +16,7 @@ pub mod traits;
 // - internal
 use zff::{
 	HashType,
-	header::version2::{ObjectType, FileType},
+	header::version2::{ObjectType, FileType, EncryptionHeader},
 	CompressionAlgorithm,
 };
 use crate::constants::*;
@@ -231,6 +231,7 @@ pub struct ObjectHeaderInformation {
     pub signature_flag: SignatureFlag,
     pub description_header: DescriptionHeaderInformation,
     pub object_type: ObjectType,
+    pub encryption_header: Option<EncryptionHeader>,
 }
 
 impl Serialize for ObjectHeaderInformation {
@@ -352,6 +353,7 @@ pub struct DescriptionHeaderInformation {
     pub information: HashMap<String, String>,
 }
 
+#[derive(Debug)]
 pub struct FileHeaderInformation {
     pub file_type: FileType,
     pub filename: String,

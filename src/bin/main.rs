@@ -20,7 +20,7 @@ use zff::{
     constants::*,
     header::version1::{MainHeader as MainHeaderV1, SegmentHeader as SegmentHeaderV1, ChunkHeader as ChunkHeaderV1},
     footer::version1::{SegmentFooter as SegmentFooterV1},
-    header::version2::{MainHeader as MainHeaderV2, SegmentHeader as SegmentHeaderV2, ObjectHeader, FileHeader, HashHeader as HashHeaderV2},
+    header::version2::{MainHeader as MainHeaderV2, SegmentHeader as SegmentHeaderV2, ObjectHeader, FileHeader, HashHeader as HashHeaderV2, EncryptionHeader as EncryptionHeaderV2},
     footer::version2::{SegmentFooter as SegmentFooterV2, MainFooter, ObjectFooterPhysical, ObjectFooterLogical, FileFooter},
     ValueDecoder,
     HeaderCoding,
@@ -250,6 +250,29 @@ fn main() {
     }
     for (unique_identifier, inner_logical_object_footer_map) in &logical_object_footer_map {
        for (object_number, logical_object_footer) in inner_logical_object_footer_map {
+        let (mut decryption_key, mut encryption_header) = (None, None);
+        for info in information.get(unique_identifier).unwrap() {
+            match info {
+                Information::ObjectHeaderInformation(obj_header_info) => if obj_header_info.object_number == *object_number {
+                    encryption_header = obj_header_info.encryption_header.as_ref();
+                    match encryption_header {
+                        Some(encryption_header) => {
+                            for password in &args.decryption_passwords {
+                                match &encryption_header.decrypt_encryption_key(password) {
+                                    Ok(key) => {
+                                        decryption_key = Some(key.clone());
+                                        break;
+                                    },
+                                    Err(_) => continue,
+                                }
+                            }
+                        },
+                        None => break,
+                    }
+                },
+                _ => continue,
+            }
+        }
         let mut object_footer_information_logical = ObjectFooterInformationLogical {
             object_number: *object_number,
             file_header_map: HashMap::new(),
@@ -265,8 +288,16 @@ fn main() {
                         //TODO: Error handling if verbose mode=on? - or logging to STDERR? with match and continue?
                         if let Ok(file_header_information) = get_file_header_information(file, *offset) {
                             object_footer_information_logical.file_header_map.insert(*file_number, file_header_information);
+                        } else {
+                            match &decryption_key {
+                                None => eprintln!("Warning: file header of file number {file_number} in object {object_number} is encrypted and not readable."),
+                                Some(key) => {
+                                    if let Ok(file_header_information) = get_encrypted_file_header_information(file, *offset, key, encryption_header.unwrap()) {
+                                        object_footer_information_logical.file_header_map.insert(*file_number, file_header_information);
+                                    }
+                                }
+                            }
                         }
-                            
                     }
                 }
             }
@@ -363,6 +394,7 @@ fn get_object_header_information(file: &mut File, offset: u64) -> Result<ObjectH
         signature_flag: object_header.signature_flag().clone(),
         object_type: object_header.object_type(),
         description_header: description_header_information,
+        encryption_header: object_header.encryption_header().cloned(),
     };
     Ok(object_header_information)
 }
@@ -384,6 +416,7 @@ fn get_encrypted_object_header_information<P: Into<String>>(file: &mut File, off
         signature_flag: object_header.signature_flag().clone(),
         object_type: object_header.object_type(),
         description_header: description_header_information,
+        encryption_header: object_header.encryption_header().cloned(),
     };
     Ok(object_header_information)
 }
@@ -436,6 +469,22 @@ fn get_file_header_information(file: &mut File, offset: u64) -> Result<FileHeade
         metadata_extended_information: file_header.metadata_ext().clone(),
     })
 }
+
+fn get_encrypted_file_header_information<K: AsRef<[u8]>>(file: &mut File, offset: u64, key: K, encryption_header: &EncryptionHeaderV2) -> Result<FileHeaderInformation> {
+    file.seek(SeekFrom::Start(offset))?;
+    let file_header = FileHeader::decode_encrypted_header_with_key(file, key, encryption_header.clone())?;
+    Ok(FileHeaderInformation {
+        file_type: file_header.file_type(),
+        filename: file_header.filename().to_string(),
+        parent_file_number: file_header.parent_file_number(),
+        atime: file_header.atime(),
+        mtime: file_header.mtime(),
+        ctime: file_header.ctime(),
+        btime: file_header.btime(),
+        metadata_extended_information: file_header.metadata_ext().clone(),
+    })
+}
+
 fn get_file_footer_information(file: &mut File, offset: u64) -> Result<FileFooterInformation> {
     file.seek(SeekFrom::Start(offset))?;
     let file_footer = FileFooter::decode_directly(file)?;
