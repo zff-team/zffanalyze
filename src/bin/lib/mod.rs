@@ -16,8 +16,11 @@ pub mod traits;
 // - internal
 use zff::{
 	HashType,
-	header::version2::{ObjectType, FileType, EncryptionHeader},
+	header::version2::{ObjectType, FileType, EncryptionHeader, PBEHeader, KDFParameters},
 	CompressionAlgorithm,
+    KDFScheme,
+    PBEScheme,
+    EncryptionAlgorithm,
 };
 use crate::constants::*;
 use traits::*;
@@ -70,15 +73,15 @@ impl Serialize for Information {
             Information::MainHeaderInformationV2(main) => state.serialize_field("Main", &main)?,
             Information::MainFooterInformation(main) => state.serialize_field("Main", &main)?,
             Information::ObjectHeaderInformation(obj_header) => {
-                let key = string_to_str(format!("ObjectHeader_{}", obj_header.object_number));
+                let key = string_to_str(format!("object_header_{}", obj_header.object_number));
                 state.serialize_field(key, &obj_header)?
             },
             Information::ObjectFooterInformationLogical(obj_footer) => {
-                let key = string_to_str(format!("ObjectFooterLogical_{}", obj_footer.object_number));
+                let key = string_to_str(format!("object_footer_{}", obj_footer.object_number));
                 state.serialize_field(key, &obj_footer)?
             },
             Information::ObjectFooterInformationPhysical(obj_footer) => {
-                let key = string_to_str(format!("ObjectFooterPhysical_{}", obj_footer.object_number));
+                let key = string_to_str(format!("Object_footer_{}", obj_footer.object_number));
                 state.serialize_field(key, &obj_footer)?
             },
         }
@@ -166,13 +169,13 @@ impl Serialize for MainInformationV1 {
         S: Serializer,
     {
         let mut state = serializer.serialize_struct("MainHeaderInformation", 6)?;
-        state.serialize_field("chunk size", &format!("{} ({} bytes)", &self.chunk_size.bytes_as_hrb(), &self.chunk_size))?;
-        state.serialize_field("signature flag", &self.signature_flag)?;
-        state.serialize_field("segment size", &self.segment_size)?;
-        state.serialize_field("number of segments", &self.number_of_segments)?;
-        state.serialize_field("length of data", &self.length_of_data)?;
+        state.serialize_field("chunk_size", &format!("{} ({} bytes)", &self.chunk_size.bytes_as_hrb(), &self.chunk_size))?;
+        state.serialize_field("signature_flag", &self.signature_flag)?;
+        state.serialize_field("segment_size", &self.segment_size)?;
+        state.serialize_field("number_of_segments", &self.number_of_segments)?;
+        state.serialize_field("length_of_data", &self.length_of_data)?;
         state.serialize_field("compression_information", &self.compression_information)?;
-        state.serialize_field("segment information", &self.segment_information)?;
+        state.serialize_field("segment_information", &self.segment_information)?;
         state.end()
     }
 }
@@ -189,8 +192,8 @@ impl Serialize for SegmentInformation {
         S: Serializer,
     {
         let mut state = serializer.serialize_struct("SegmentInformation", 6)?;
-        state.serialize_field("segment number", &self.segment_number)?;
-        state.serialize_field("length of segment", &format!("{} ({} bytes)", &self.length_of_segment.bytes_as_hrb(), &self.length_of_segment))?;
+        state.serialize_field("segment_number", &self.segment_number)?;
+        state.serialize_field("length_of_segment", &format!("{} ({} bytes)", &self.length_of_segment.bytes_as_hrb(), &self.length_of_segment))?;
         for chunk in &self.chunk_information {
         	state.serialize_field("chunk", &chunk)?;
         }
@@ -211,9 +214,9 @@ impl Serialize for MainHeaderInformationV2 {
         S: Serializer,
     {
         let mut state = serializer.serialize_struct("MainHeaderInformation", 6)?;
-        state.serialize_field("chunk size", &format!("{} ({} bytes)", &self.chunk_size.bytes_as_hrb(), &self.chunk_size))?;
-        state.serialize_field("segment size", &format!("{} ({} bytes)", &self.segment_size.bytes_as_hrb(), &self.segment_size))?;
-        state.serialize_field("segment information", &self.segment_information)?;
+        state.serialize_field("chunk_size", &format!("{} ({} bytes)", &self.chunk_size.bytes_as_hrb(), &self.chunk_size))?;
+        state.serialize_field("segment_size", &format!("{} ({} bytes)", &self.segment_size.bytes_as_hrb(), &self.segment_size))?;
+        state.serialize_field("segment_information", &self.segment_information)?;
         state.end()
     }
 }
@@ -241,9 +244,9 @@ impl Serialize for ObjectHeaderInformation {
     {
         
         let mut state = serializer.serialize_struct("ObjectHeaderInformation", 6)?;
-        state.serialize_field("object number", &self.object_number)?;
+        state.serialize_field("object_number", &self.object_number)?;
         state.serialize_field("compression_information", &self.compression_information)?;
-        state.serialize_field("object type", &ObjectTypeInformation::from(&self.object_type))?;
+        state.serialize_field("object_type", &ObjectTypeInformation::from(&self.object_type))?;
         
         let description_header_information = {
             let mut new_map = HashMap::new();
@@ -263,7 +266,99 @@ impl Serialize for ObjectHeaderInformation {
         state.serialize_field("description_information", &description_header_information)?;
         state.serialize_field("signature_flag", &self.signature_flag.to_string())?;
 
+        if let Some(encryption_header) = &self.encryption_header {
+            state.serialize_field("encryption_information", &EncryptionHeaderInformation::from(encryption_header))?;
+        }
+
         state.end()
+    }
+}
+
+pub struct EncryptionHeaderInformation {
+    pub pbe_header: PBEHeader,
+    pub encryption_algorithm: EncryptionAlgorithm,
+}
+
+impl Serialize for EncryptionHeaderInformation {
+    fn serialize<S>(&self, serializer: S) -> std::result::Result<S::Ok, S::Error>
+    where
+        S: Serializer,
+    {
+        
+        let mut state = serializer.serialize_struct("EncryptionHeaderInformation", 2)?;
+        state.serialize_field("pbe_header", &PBEHeaderInformation::from(&self.pbe_header))?;
+        match self.encryption_algorithm {
+            EncryptionAlgorithm::AES128GCMSIV => state.serialize_field("encryption_algorithm", "AES-128-GCM-SIV")?,
+            EncryptionAlgorithm::AES256GCMSIV => state.serialize_field("encryption_algorithm", "AES-256-GCM-SIV")?,
+            _ => state.serialize_field("encryption_algorithm", "unknown_encryption_algorithm")?,
+        }
+
+        state.end()
+    }
+}
+
+impl From<EncryptionHeader> for EncryptionHeaderInformation {
+    fn from(header: EncryptionHeader) -> EncryptionHeaderInformation {
+        EncryptionHeaderInformation {
+            pbe_header: header.pbe_header().clone(),
+            encryption_algorithm: header.algorithm().clone(),
+        }
+    }
+}
+
+impl From<&EncryptionHeader> for EncryptionHeaderInformation {
+    fn from(header: &EncryptionHeader) -> EncryptionHeaderInformation {
+        EncryptionHeaderInformation {
+            pbe_header: header.pbe_header().clone(),
+            encryption_algorithm: header.algorithm().clone(),
+        }
+    }
+}
+
+pub struct PBEHeaderInformation {
+    pub kdf_scheme: KDFScheme,
+    pub encryption_scheme: PBEScheme,
+    pub kdf_parameters: KDFParameters,
+    pub pbencryption_nonce: [u8; 16],
+}
+
+impl Serialize for PBEHeaderInformation {
+    fn serialize<S>(&self, serializer: S) -> std::result::Result<S::Ok, S::Error>
+    where
+        S: Serializer,
+    {
+        
+        let mut state = serializer.serialize_struct("PBEHeaderInformation", 4)?;
+        let kdf_scheme = match self.kdf_scheme {
+            KDFScheme::PBKDF2SHA256 => "pbkdf2/sha256",
+            KDFScheme::Scrypt => "scrypt",
+            _ => "unknown"
+        };
+        state.serialize_field("kdf_scheme", &kdf_scheme)?;
+
+        state.end()
+    }
+}
+
+impl From<PBEHeader> for PBEHeaderInformation {
+    fn from(header: PBEHeader) -> PBEHeaderInformation {
+        PBEHeaderInformation {
+            kdf_scheme: header.kdf_scheme().clone(),
+            encryption_scheme: header.encryption_scheme().clone(),
+            kdf_parameters: header.kdf_parameters().clone(),
+            pbencryption_nonce: *header.nonce()
+        }
+    }
+}
+
+impl From<&PBEHeader> for PBEHeaderInformation {
+    fn from(header: &PBEHeader) -> PBEHeaderInformation {
+        PBEHeaderInformation {
+            kdf_scheme: header.kdf_scheme().clone(),
+            encryption_scheme: header.encryption_scheme().clone(),
+            kdf_parameters: header.kdf_parameters().clone(),
+            pbencryption_nonce: *header.nonce()
+        }
     }
 }
 
@@ -308,11 +403,11 @@ impl Serialize for ObjectFooterInformationPhysical {
     		state.serialize_field("acquisition_end", &self.acquisition_end)?;
     	};
 
-        state.serialize_field("object number", &self.object_number)?;
-        state.serialize_field("length of data", &format!("{} ({} bytes)", &self.length_of_data.bytes_as_hrb(), &self.length_of_data))?;
-        state.serialize_field("number of chunks", &self.number_of_chunks)?;
+        state.serialize_field("objectnumber", &self.object_number)?;
+        state.serialize_field("length_of_data", &format!("{} ({} bytes)", &self.length_of_data.bytes_as_hrb(), &self.length_of_data))?;
+        state.serialize_field("number_of_chunks", &self.number_of_chunks)?;
         for hash_info in &self.hash_information {
-        	state.serialize_field("hash information", &hash_info)?;
+        	state.serialize_field("hash_information", &hash_info)?;
         };
 
         state.end()
@@ -332,7 +427,7 @@ impl Serialize for ObjectFooterInformationLogical {
         S: Serializer,
     {
         let mut state = serializer.serialize_struct("ObjectFooterInformationLogical", 6)?;
-        state.serialize_field("object number", &self.object_number)?;
+        state.serialize_field("objectnumber", &self.object_number)?;
         let mut stringified_file_header_map = HashMap::new();
         for (file_number, file_header) in &self.file_header_map {
             stringified_file_header_map.insert(file_number.to_string(), file_header);
@@ -342,8 +437,8 @@ impl Serialize for ObjectFooterInformationLogical {
             stringified_file_footer_map.insert(file_number.to_string(), file_footer);
         };
 
-        state.serialize_field("file header", &stringified_file_header_map)?;
-        state.serialize_field("file footer", &stringified_file_footer_map)?;
+        state.serialize_field("fileheader", &stringified_file_header_map)?;
+        state.serialize_field("filefooter", &stringified_file_footer_map)?;
 
         state.end()
     }
@@ -351,6 +446,21 @@ impl Serialize for ObjectFooterInformationLogical {
 
 pub struct DescriptionHeaderInformation {
     pub information: HashMap<String, String>,
+}
+
+impl Serialize for DescriptionHeaderInformation {
+    fn serialize<S>(&self, serializer: S) -> std::result::Result<S::Ok, S::Error>
+    where
+        S: Serializer,
+    {
+        let mut state = serializer.serialize_struct("DescriptionHeaderInformation", 6)?;
+        for (key, value) in &self.information {
+            let key = string_to_str(key.to_string());
+            state.serialize_field(key, &value)?;
+        }
+
+        state.end()
+    }
 }
 
 #[derive(Debug)]
@@ -375,9 +485,9 @@ impl Serialize for FileHeaderInformation {
 
         let mut state = serializer.serialize_struct("FileHeaderInformation", 6)?;
 
-        state.serialize_field("file type", &FileTypeInformation::from(&self.file_type))?;
+        state.serialize_field("filetype", &FileTypeInformation::from(&self.file_type))?;
 		state.serialize_field("filename", &self.filename)?;
-		state.serialize_field("parent file number", &self.parent_file_number)?;
+		state.serialize_field("parent_filenumber", &self.parent_file_number)?;
 
     	//atime
     	if let Ok(dt) = OffsetDateTime::from_unix_timestamp(self.atime as i64) {
@@ -423,7 +533,7 @@ impl Serialize for FileHeaderInformation {
     		state.serialize_field("btime", &self.btime)?;
     	};
 
-    	state.serialize_field("metadata extended information", &self.metadata_extended_information)?;
+    	state.serialize_field("metadata_extended_information", &self.metadata_extended_information)?;
 
         state.end()
     }
@@ -469,10 +579,10 @@ impl Serialize for FileFooterInformation {
     	} else {
     		state.serialize_field("acquisition_end", &self.acquisition_end)?;
     	};
-        state.serialize_field("length of data", &format!("{} ({} bytes)", &self.length_of_data.bytes_as_hrb(), &self.length_of_data))?;
-        state.serialize_field("number of chunks", &self.number_of_chunks)?;
+        state.serialize_field("length_of_data", &format!("{} ({} bytes)", &self.length_of_data.bytes_as_hrb(), &self.length_of_data))?;
+        state.serialize_field("number_of_chunks", &self.number_of_chunks)?;
         for hash_info in &self.hash_information {
-        	state.serialize_field("hash information", &hash_info)?;
+        	state.serialize_field("hash_information", &hash_info)?;
         };
         state.end()
     }
@@ -498,7 +608,7 @@ impl Serialize for HashInformation {
         S: Serializer,
     {
         let mut state = serializer.serialize_struct("HashInformation", 3)?;
-        state.serialize_field("hash type", &self.hash_type.to_string())?;
+        state.serialize_field("hash_type", &self.hash_type.to_string())?;
         state.serialize_field("hash", &self.hash.encode_hex::<String>())?;
         if let Some(signature) = &self.ed25519_signature {
         	state.serialize_field("signature", &base64::encode(signature))?;
@@ -522,11 +632,11 @@ impl Serialize for ChunkInformation {
         S: Serializer,
     {
         let mut state = serializer.serialize_struct("ChunkInformation", 6)?;
-        state.serialize_field("chunk number", &self.chunk_number)?;
-        state.serialize_field("chunk size", &format!("{} ({} bytes)", &self.chunk_size.bytes_as_hrb(), &self.chunk_size))?;
+        state.serialize_field("chunk_number", &self.chunk_number)?;
+        state.serialize_field("chunk_size", &format!("{} ({} bytes)", &self.chunk_size.bytes_as_hrb(), &self.chunk_size))?;
         state.serialize_field("crc32", &self.crc32.to_string().encode_hex::<String>())?;
-        state.serialize_field("error flag", &self.error_flag)?;
-        state.serialize_field("compression flag", &self.compression_flag)?;
+        state.serialize_field("error_flag", &self.error_flag)?;
+        state.serialize_field("compression_flag", &self.compression_flag)?;
         if let Some(signature) = &self.ed25519_signature {
         	state.serialize_field("signature", &base64::encode(signature))?;
         }
