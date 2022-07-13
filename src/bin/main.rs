@@ -25,6 +25,9 @@ use zff::{
     ValueDecoder,
     HeaderCoding,
     ZffErrorKind,
+    ZffReader,
+    Object,
+    Hash,
 };
 
 // - external
@@ -48,13 +51,13 @@ struct Cli {
 
     ///TODO: Implement
     /// The password(s), if the file(s) are encrypted. You can use this option multiple times to enter different passwords for different objects.
-    #[clap(short='p', long="decryption-password", multiple_values=true)]
+    #[clap(short='p', long="decryption-passwords", multiple_values=true)]
     decryption_passwords: Vec<String>,
 
     ///TODO: Implement
-    /// The path to the file which contains the public key.
-    #[clap(short='k', long="publickey-file")]
-    publickey_file: Option<String>,
+    /// The public sign key to verify the appropriate signatures.
+    #[clap(short='k', long="pub-key")]
+    public_key: Option<String>,
 
     ///TODO: Implement
     /// Checks the integrity of the imaged data by calculating/comparing the used hash values.
@@ -78,6 +81,199 @@ enum HeaderType {
 
 fn main() {
     let args = Cli::parse();
+    if args.check_integrity {
+        match check_integrity(&args) {
+            Ok(_) => exit(EXIT_STATUS_SUCCESS),
+            Err(e) => {
+                eprintln!("An error occurred, while trying to calculate hash values: {e}");
+                exit(EXIT_STATUS_ERROR);
+            }
+        }
+    } else {
+        analyze(&args);
+    }
+}
+
+//TODO: implement multi threading for this function
+fn check_integrity(args: &Cli) -> Result<()> {
+    let mut files = Vec::new();
+    for path in &args.inputfiles {
+     let f = File::open(&path)?;
+        files.push(f);
+    };
+
+    let temp_zffreader = ZffReader::new(files, HashMap::new())?;
+
+    //check encryption and try to decrypt
+    let mut passwords_per_object = HashMap::new();
+
+    for object_number in temp_zffreader.undecryptable_objects() {
+        let mut decryption_state = false;
+        'inner:  for password in &args.decryption_passwords {
+            let mut temp_pw_map = HashMap::new();
+            temp_pw_map.insert(*object_number, password.to_string());
+
+            let mut files = Vec::new();
+            for path in &args.inputfiles {
+                let f = File::open(&path)?;
+                files.push(f);
+            };
+            let inner_temp_zffreader = match ZffReader::new(files, temp_pw_map) {
+                Ok(zffreader) => zffreader,
+                Err(e) => match e.get_kind() {
+                    ZffErrorKind::PKCS5CryptoError => continue,
+                    _ => return Err(e)
+                },
+            };
+            if !inner_temp_zffreader.undecryptable_objects().contains(object_number) {
+                passwords_per_object.insert(*object_number, password.to_string());
+                decryption_state = true;
+                break 'inner;
+            }
+        }
+        if !decryption_state {
+            eprintln!("Could not decrypt object {object_number} (bad password?).");
+            exit(EXIT_STATUS_ERROR);
+        }
+    }
+
+
+    let mut files = Vec::new();
+    for path in &args.inputfiles {
+        let f = File::open(&path)?;
+        files.push(f);
+    };
+    let mut zffreader = ZffReader::new(files, passwords_per_object.clone())?;
+
+    let object_numbers = zffreader.object_numbers();
+
+    for object_number in object_numbers {
+        println!("Calculating and comparing hash values for object {object_number} ...");
+        let object = zffreader.object(object_number).unwrap().clone();
+        match object {
+            Object::Physical(ref obj_info) => {
+                let hash_types = obj_info.footer().hash_header().hash_values().iter().map(|x| x.hash_type());
+                let mut hasher_map = HashMap::new();
+                for h_type in hash_types {
+                    let hasher = Hash::new_hasher(h_type);
+                    hasher_map.insert(h_type.clone(), hasher);
+                };
+                if hasher_map.is_empty() {
+                    println!("  ... no calculated hash values available for object {object_number}!");
+                    continue;
+                };
+                zffreader.set_reader_physical_object(object.object_number())?;
+                
+                let mut eof = false;
+
+                loop {
+                    let mut buf = vec![0u8; BUFFER_DEFAULT_SIZE];
+                    let mut read_bytes = 0;
+
+                    while read_bytes < BUFFER_DEFAULT_SIZE {
+                        let r = zffreader.read(&mut buf[read_bytes..])?;
+                        if r == 0 {
+                            eof = true;
+                            break;
+                        }
+                        read_bytes += r;
+                    }
+                    let buf = if read_bytes == BUFFER_DEFAULT_SIZE {
+                        buf
+                    } else {
+                        buf[..read_bytes].to_vec()
+                    };
+
+                    for hasher in hasher_map.values_mut() {
+                        hasher.update(&buf);
+                    }
+                    if eof {
+                        break;
+                    }
+                }
+
+                for (hash_type, hasher) in hasher_map.clone() {
+                    let hash1 = hasher.finalize();
+                    let hash2 = obj_info.footer().hash_header().hash_values().iter().find(|x| x.hash_type() == &hash_type).unwrap().hash();
+                    if &hash1.to_vec() == hash2 {
+                        println!("    ... done. Hash value-based integrity check using {hash_type} successful. Hash value is correct.");
+                    } else {
+                        println!("    ... failed. Hash value-based integrity check using {hash_type} failed: incorrect hash value.");
+                    }
+                }
+            },
+
+            Object::Logical(ref obj_info) => {
+                let mut hash_conflict = false;
+
+                for (current_filenumber, current_file) in obj_info.files() {
+                    let hash_types = current_file.footer().hash_header().hash_values().iter().map(|x| x.hash_type());
+                    let mut hasher_map = HashMap::new();
+                    for h_type in hash_types {
+                        let hasher = Hash::new_hasher(h_type);
+                        hasher_map.insert(h_type.clone(), hasher);
+                    };
+                    
+                    if hasher_map.is_empty() {
+                        let filename = current_file.header().filename();
+                        println!("  ... no calculated hash values available for file no {current_filenumber}: {filename}");
+                        continue;
+                    };
+
+                    zffreader.set_reader_logical_object_file(object.object_number(), *current_filenumber)?;
+
+                    let mut eof = false;
+
+                    loop {
+                        let mut buf = vec![0u8; BUFFER_DEFAULT_SIZE];
+                        let mut read_bytes = 0;
+
+                        while read_bytes < BUFFER_DEFAULT_SIZE {
+                            let r = zffreader.read(&mut buf[read_bytes..])?;
+                            if r == 0 {
+                                eof = true;
+                                break;
+                            }
+                            read_bytes += r;
+                        }
+                        let buf = if read_bytes == BUFFER_DEFAULT_SIZE {
+                            buf
+                        } else {
+                            buf[..read_bytes].to_vec()
+                        };
+
+                        for hasher in hasher_map.values_mut() {
+                            hasher.update(&buf);
+                        }
+                        if eof {
+                            break;
+                        }
+                    }
+
+                    for (hash_type, hasher) in hasher_map.clone() {
+                        let hash1 = hasher.finalize();
+                        let hash2 = current_file.footer().hash_header().hash_values().iter().find(|x| x.hash_type() == &hash_type).unwrap().hash();
+                        if &hash1.to_vec() != hash2 {
+                            println!("    ... failed. Hash value-based integrity check using {hash_type} failed: incorrect hash value.");
+                            hash_conflict = true;
+                        }
+                    }
+                }
+
+                if !hash_conflict {
+                    println!("    ... done. Hash value-based integrity checks of all object files successful. Hash values are correct.");
+                } else {
+                    println!("    ... failed. Hash value-based integrity checks of some object files failed: incorrect hash value(s).");
+                }
+            }
+        }
+    }
+
+    Ok(())
+}
+
+fn analyze(args: &Cli) {
+    
     let mut files = HashMap::new(); //<file number of .zXX file, std::file::File>
     let mut file_numbers = Vec::new(); //zff file numbers
     let mut segments_map = HashMap::new(); // <segment number, file number of .zXX file>
@@ -102,7 +298,7 @@ fn main() {
     for file_number in file_numbers {
         // - unwrap should be safe here, because we have filled the map and the vector above with the correct file numbers.
         let file = files.get_mut(&file_number).unwrap();
-        let header_type = match get_header(file, &args) {
+        let header_type = match get_header(file, args) {
             Ok(ht) => ht,
             Err(err_msg) => {
                 eprintln!("{ERROR_FILE_READ}{err_msg}");
@@ -120,7 +316,7 @@ fn main() {
                         exit(EXIT_STATUS_ERROR);
                     }
                 };
-                let segment_information = match get_segment_information_v1(&args, file, first_segment_header) {
+                let segment_information = match get_segment_information_v1(args, file, first_segment_header) {
                     Ok(seg_info) => seg_info,
                     Err(e) => {
                         eprintln!("{ERROR_GET_SEGMENT_INFORMATION_V1}{e}");
@@ -153,7 +349,7 @@ fn main() {
             },
             HeaderType::SegmentHeaderV1(segment_header) => {
                 let unique_identifier = segment_header.unique_identifier();
-                let segment_information = match get_segment_information_v1(&args, file, segment_header) {
+                let segment_information = match get_segment_information_v1(args, file, segment_header) {
                     Ok(seg_info) => seg_info,
                     Err(e) => {
                         eprintln!("{ERROR_GET_SEGMENT_INFORMATION_V1}{e}");
@@ -179,7 +375,7 @@ fn main() {
                     }
                 };
                 segments_map.insert(first_segment_header.segment_number(), file_number);
-                let segment_information = match get_segment_information_v2(&args, file, first_segment_header, &mut information, &mut logical_object_footer_map) {
+                let segment_information = match get_segment_information_v2(args, file, first_segment_header, &mut information, &mut logical_object_footer_map) {
                     Ok(seg_info) => seg_info,
                     Err(e) => {
                         eprintln!("{ERROR_GET_SEGMENT_INFORMATION_V2}{e}");
@@ -217,7 +413,7 @@ fn main() {
             HeaderType::SegmentHeaderV2(segment_header) => {
                 let unique_identifier = segment_header.unique_identifier();
                 segments_map.insert(segment_header.segment_number(), file_number);
-                let segment_information = match get_segment_information_v2(&args, file, segment_header, &mut information, &mut logical_object_footer_map) {
+                let segment_information = match get_segment_information_v2(args, file, segment_header, &mut information, &mut logical_object_footer_map) {
                     Ok(seg_info) => seg_info,
                     Err(e) => {
                         eprintln!("{ERROR_GET_SEGMENT_INFORMATION_V2}{e}");

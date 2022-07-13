@@ -21,3 +21,5 @@ pub(crate) const ERROR_UNIMPLEMENTED_FILETYPE: &str = "An error occurred while t
 
 pub(crate) const EXIT_STATUS_ERROR: i32 = 1;
 pub(crate) const EXIT_STATUS_SUCCESS: i32 = 0;
+
+pub(crate) const BUFFER_DEFAULT_SIZE: usize = 1048576;
