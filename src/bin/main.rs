@@ -28,6 +28,7 @@ use zff::{
     ZffReader,
     Object,
     Hash,
+    Signature,
 };
 
 // - external
@@ -49,17 +50,14 @@ struct Cli {
     #[clap(short='v', long="verbose")]
     verbose: bool,
 
-    ///TODO: Implement
     /// The password(s), if the file(s) are encrypted. You can use this option multiple times to enter different passwords for different objects.
     #[clap(short='p', long="decryption-passwords", multiple_values=true)]
     decryption_passwords: Vec<String>,
 
-    ///TODO: Implement
     /// The public sign key to verify the appropriate signatures.
     #[clap(short='k', long="pub-key")]
     public_key: Option<String>,
 
-    ///TODO: Implement
     /// Checks the integrity of the imaged data by calculating/comparing the used hash values.
     #[clap(short='c', long="integrity-check")]
     check_integrity: bool,
@@ -89,13 +87,24 @@ fn main() {
                 exit(EXIT_STATUS_ERROR);
             }
         }
-    } else {
+    }
+
+    if let Some(ref public_key) = args.public_key {
+         match check_signatures(&args, public_key) {
+            Ok(_) => exit(EXIT_STATUS_SUCCESS),
+            Err(e) => {
+                eprintln!("An error occurred, while trying to check the signatures: {e}");
+                exit(EXIT_STATUS_ERROR);
+            }
+         }
+    }
+
+    if !args.check_integrity && args.public_key.is_none() {
         analyze(&args);
     }
 }
 
-//TODO: implement multi threading for this function
-fn check_integrity(args: &Cli) -> Result<()> {
+fn gen_password_per_object_map(args: &Cli) -> Result<HashMap<u64, String>> {
     let mut files = Vec::new();
     for path in &args.inputfiles {
      let f = File::open(&path)?;
@@ -137,13 +146,129 @@ fn check_integrity(args: &Cli) -> Result<()> {
         }
     }
 
+    Ok(passwords_per_object)
+}
 
+fn check_signatures(args: &Cli, public_key: &str) -> Result<()> {
     let mut files = Vec::new();
     for path in &args.inputfiles {
         let f = File::open(&path)?;
         files.push(f);
     };
-    let mut zffreader = ZffReader::new(files, passwords_per_object.clone())?;
+
+    let mut zffreader = ZffReader::new(files, gen_password_per_object_map(args)?)?;
+
+    let object_numbers = zffreader.object_numbers();
+
+    let public_key = match base64::decode(public_key)?.try_into() {
+        Ok(key) => key,
+        Err(_) => {
+            eprintln!("public_key has an unexpected length: {} bytes", base64::decode(public_key)?.len());
+            exit(EXIT_STATUS_ERROR);
+        }
+    };
+
+    for object_number in object_numbers {
+        let object = zffreader.object(object_number).unwrap().clone();
+        if object.header().has_per_chunk_signatures() {
+            println!("Verifing per chunk signatures for object {object_number} ...");
+
+            match object {
+                Object::Physical(_) => {
+                    zffreader.set_reader_physical_object(object_number)?;
+                },
+                Object::Logical(_) => {
+                    zffreader.set_reader_logical_object_file(object_number, 1)?;
+                }
+            }
+
+            match zffreader.verify_chunk_signatures(public_key) {
+                Err(e) => match e.get_kind() {
+                    ZffErrorKind::NoSignatureFoundAtChunk => eprintln!("Could not verify per chunk signatures: no signatures found."),
+                    _ => return Err(e)
+                },
+                Ok(corrupt_chunks) => {
+                    if corrupt_chunks.is_empty() {
+                        println!("    ... all signatures are valid.");
+                    } else {
+                        println!("    ... invalid signatures found for following chunks:");
+                        for chunk_no in corrupt_chunks {
+                            print!("{} ", chunk_no);
+                        }
+                        println!(); 
+                    }
+                }
+            }
+        }
+
+        if object.header().has_hash_signatures() {
+            println!("Verifing hash signatures for object {object_number} ...");
+
+            match object {
+                Object::Physical(ref obj_info) => {
+                    for hash_value in obj_info.footer().hash_header().hash_values() {
+                        let hash_type = hash_value.hash_type();
+                        let hash = hash_value.hash();
+                        let signature = match hash_value.ed25519_signature() {
+                            Some(sig) => sig,
+                            None => {
+                                eprintln!("    ... no signatures found for {hash_type}.");
+                                continue;
+                            }
+                        };
+                        if Signature::verify(public_key, hash, signature)? {
+                            println!("    ... signature of {hash_type} is valid.");
+                        } else {
+                            println!("    ... signature of {hash_type} is invalid.");
+                        }
+                    }
+                    if obj_info.footer().hash_header().hash_values().is_empty() {
+                        println!("    ... no hashes calculated in this object.");
+                    }
+                },
+                Object::Logical(ref obj_info) => {
+                    for (filenumber, file) in obj_info.files() {
+                        let mut invalid_sig_found = false;
+                        let mut hashes_calculated = false;
+                        for hash_value in file.footer().hash_header().hash_values() {
+                            hashes_calculated = true;
+                            let hash_type = hash_value.hash_type();
+                            let hash = hash_value.hash();
+                            let signature = match hash_value.ed25519_signature() {
+                                Some(sig) => sig,
+                                None => {
+                                    eprintln!("    ... no signatures found for {hash_type}-hashed file {filenumber}");
+                                    continue;
+                                }
+                            };
+                            if !Signature::verify(public_key, hash, signature)? {
+                                println!("    ... signature of {hash_type}-hashed file {filenumber} is invalid.");
+                                invalid_sig_found = true;
+                            }
+                        }
+                        if !hashes_calculated {
+                            println!("    ... no hashes calculated in this object.");
+                        } else if !invalid_sig_found {
+                            println!("    ... all found signatures are valid.");
+                        }
+                    }
+                }
+            }
+        }
+    }
+
+    Ok(())
+}
+
+//TODO: implement multi threading for this function
+fn check_integrity(args: &Cli) -> Result<()> {
+    let mut files = Vec::new();
+    for path in &args.inputfiles {
+        let f = File::open(&path)?;
+        files.push(f);
+    };
+
+    let mut zffreader = ZffReader::new(files, gen_password_per_object_map(args)?)?;
 
     let object_numbers = zffreader.object_numbers();
 
