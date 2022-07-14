@@ -39,27 +39,27 @@ use clap::{Parser, ArgEnum};
 struct Cli {
 
     /// The input files. This should be your zff image files. You can use this Option multiple times.
-    #[clap(short='i', long="inputfiles", multiple_values=true)]
+    #[clap(short=INPUTFILES_SHORT, long=INPUTFILES_LONG, multiple_values=true)]
     inputfiles: Vec<String>,
 
     /// The output format.
-    #[clap(short='f', long="output-format", arg_enum, default_value="toml")]
+    #[clap(short=OUTPUT_FORMAT_SHORT, long=OUTPUT_FORMAT_LONG, arg_enum, default_value=DEFAULT_OUPUT_FORMAT)]
     output_format: OutputFormat,
 
     /// Verbose mode to show each chunk information.
-    #[clap(short='v', long="verbose")]
+    #[clap(short=VERBOSE_SHORT, long=VERBOSE_LONG)]
     verbose: bool,
 
     /// The password(s), if the file(s) are encrypted. You can use this option multiple times to enter different passwords for different objects.
-    #[clap(short='p', long="decryption-passwords", multiple_values=true)]
+    #[clap(short=DECRPYTION_PASSWORDS_SHORT, long=DECRPYTION_PASSWORDS_LONG, multiple_values=true)]
     decryption_passwords: Vec<String>,
 
     /// The public sign key to verify the appropriate signatures.
-    #[clap(short='k', long="pub-key")]
+    #[clap(short=PUBLIC_KEY_SHORT, long=PUBLIC_KEY_LONG)]
     public_key: Option<String>,
 
     /// Checks the integrity of the imaged data by calculating/comparing the used hash values.
-    #[clap(short='c', long="integrity-check")]
+    #[clap(short=INTEGRITY_CHECKS_SHORT, long=INTEGRITY_CHECKS_LONG)]
     check_integrity: bool,
 }
 
@@ -83,7 +83,7 @@ fn main() {
         match check_integrity(&args) {
             Ok(_) => exit(EXIT_STATUS_SUCCESS),
             Err(e) => {
-                eprintln!("An error occurred, while trying to calculate hash values: {e}");
+                eprintln!("{ERROR_TRYING_CALCULATE_HASHES_}{e}");
                 exit(EXIT_STATUS_ERROR);
             }
         }
@@ -93,7 +93,7 @@ fn main() {
          match check_signatures(&args, public_key) {
             Ok(_) => exit(EXIT_STATUS_SUCCESS),
             Err(e) => {
-                eprintln!("An error occurred, while trying to check the signatures: {e}");
+                eprintln!("{ERROR_TRYING_VERIFY_SIGNATURES_}{e}");
                 exit(EXIT_STATUS_ERROR);
             }
          }
@@ -141,7 +141,7 @@ fn gen_password_per_object_map(args: &Cli) -> Result<HashMap<u64, String>> {
             }
         }
         if !decryption_state {
-            eprintln!("Could not decrypt object {object_number} (bad password?).");
+            eprintln!("{ERROR_DECRYPT_OBJECT_}{object_number} ({HINT_BAD_PASSWORD}).");
             exit(EXIT_STATUS_ERROR);
         }
     }
@@ -163,7 +163,7 @@ fn check_signatures(args: &Cli, public_key: &str) -> Result<()> {
     let public_key = match base64::decode(public_key)?.try_into() {
         Ok(key) => key,
         Err(_) => {
-            eprintln!("public_key has an unexpected length: {} bytes", base64::decode(public_key)?.len());
+            eprintln!("{ERROR_UNEXPECTED_PUBKEY_LENGTH}{} {SER_BYTES}", base64::decode(public_key)?.len());
             exit(EXIT_STATUS_ERROR);
         }
     };
@@ -171,7 +171,7 @@ fn check_signatures(args: &Cli, public_key: &str) -> Result<()> {
     for object_number in object_numbers {
         let object = zffreader.object(object_number).unwrap().clone();
         if object.header().has_per_chunk_signatures() {
-            println!("Verifing per chunk signatures for object {object_number} ...");
+            println!("{M_VERIFING_PER_CHUNK_SIGS_OBJ_}{object_number} ...");
 
             match object {
                 Object::Physical(_) => {
@@ -184,14 +184,14 @@ fn check_signatures(args: &Cli, public_key: &str) -> Result<()> {
 
             match zffreader.verify_chunk_signatures(public_key) {
                 Err(e) => match e.get_kind() {
-                    ZffErrorKind::NoSignatureFoundAtChunk => eprintln!("Could not verify per chunk signatures: no signatures found."),
+                    ZffErrorKind::NoSignatureFoundAtChunk => eprintln!("{ERROR_PER_CHUNK_SIGS_NO_SIGS_FOUND}"),
                     _ => return Err(e)
                 },
                 Ok(corrupt_chunks) => {
                     if corrupt_chunks.is_empty() {
-                        println!("    ... all signatures are valid.");
+                        println!("{M_ALL_SIGS_VALID}");
                     } else {
-                        println!("    ... invalid signatures found for following chunks:");
+                        println!("{M_INVALID_SIGS_FOR_CHUNKS_}");
                         for chunk_no in corrupt_chunks {
                             print!("{} ", chunk_no);
                         }
@@ -202,7 +202,7 @@ fn check_signatures(args: &Cli, public_key: &str) -> Result<()> {
         }
 
         if object.header().has_hash_signatures() {
-            println!("Verifing hash signatures for object {object_number} ...");
+            println!("{M_VERIFING_HASH_SIGS_OBJ_}{object_number} ...");
 
             match object {
                 Object::Physical(ref obj_info) => {
@@ -212,18 +212,18 @@ fn check_signatures(args: &Cli, public_key: &str) -> Result<()> {
                         let signature = match hash_value.ed25519_signature() {
                             Some(sig) => sig,
                             None => {
-                                eprintln!("    ... no signatures found for {hash_type}.");
+                                eprintln!("{M_NO_SIGS_FOUND_FOR_}{hash_type}.");
                                 continue;
                             }
                         };
                         if Signature::verify(public_key, hash, signature)? {
-                            println!("    ... signature of {hash_type} is valid.");
+                            println!("{M_VALID_SIG_FOR_}{hash_type}.");
                         } else {
-                            println!("    ... signature of {hash_type} is invalid.");
+                            println!("{M_INVALID_SIG_FOR_}{hash_type}.");
                         }
                     }
                     if obj_info.footer().hash_header().hash_values().is_empty() {
-                        println!("    ... no hashes calculated in this object.");
+                        println!("{M_NO_HASHES_CALCULATED_IN_OBJ}");
                     }
                 },
                 Object::Logical(ref obj_info) => {
@@ -232,24 +232,23 @@ fn check_signatures(args: &Cli, public_key: &str) -> Result<()> {
                         let mut hashes_calculated = false;
                         for hash_value in file.footer().hash_header().hash_values() {
                             hashes_calculated = true;
-                            let hash_type = hash_value.hash_type();
                             let hash = hash_value.hash();
                             let signature = match hash_value.ed25519_signature() {
                                 Some(sig) => sig,
                                 None => {
-                                    eprintln!("    ... no signatures found for {hash_type}-hashed file {filenumber}");
+                                    eprintln!("{M_NO_SIGS_FOR_HASHES_OF_FILE_}{filenumber}");
                                     continue;
                                 }
                             };
                             if !Signature::verify(public_key, hash, signature)? {
-                                println!("    ... signature of {hash_type}-hashed file {filenumber} is invalid.");
+                                println!("{M_INVALID_HASH_SIG_OF_FILE_}{filenumber}.");
                                 invalid_sig_found = true;
                             }
                         }
                         if !hashes_calculated {
-                            println!("    ... no hashes calculated in this object.");
+                            println!("{M_NO_HASHES_CALCULATED_IN_OBJ}");
                         } else if !invalid_sig_found {
-                            println!("    ... all found signatures are valid.");
+                            println!("{M_ALL_SIGS_VALID}");
                         }
                     }
                 }
@@ -273,7 +272,7 @@ fn check_integrity(args: &Cli) -> Result<()> {
     let object_numbers = zffreader.object_numbers();
 
     for object_number in object_numbers {
-        println!("Calculating and comparing hash values for object {object_number} ...");
+        println!("{M_CALCULATING_COMPARING_HASH_VALUES_OBJ_}{object_number} ...");
         let object = zffreader.object(object_number).unwrap().clone();
         match object {
             Object::Physical(ref obj_info) => {
@@ -284,7 +283,7 @@ fn check_integrity(args: &Cli) -> Result<()> {
                     hasher_map.insert(h_type.clone(), hasher);
                 };
                 if hasher_map.is_empty() {
-                    println!("  ... no calculated hash values available for object {object_number}!");
+                    println!("{M_NO_HASH_VALUES_FOR_OBJ_}{object_number}!");
                     continue;
                 };
                 zffreader.set_reader_physical_object(object.object_number())?;
@@ -321,9 +320,9 @@ fn check_integrity(args: &Cli) -> Result<()> {
                     let hash1 = hasher.finalize();
                     let hash2 = obj_info.footer().hash_header().hash_values().iter().find(|x| x.hash_type() == &hash_type).unwrap().hash();
                     if &hash1.to_vec() == hash2 {
-                        println!("    ... done. Hash value-based integrity check using {hash_type} successful. Hash value is correct.");
+                        println!("{M_SUCCESSFUL_INTEGRITY_CHECK_HASH_}({hash_type})");
                     } else {
-                        println!("    ... failed. Hash value-based integrity check using {hash_type} failed: incorrect hash value.");
+                        println!("{M_FAILED_INTEGRITY_CHECK_HASH_}({hash_type})");
                     }
                 }
             },
@@ -341,7 +340,7 @@ fn check_integrity(args: &Cli) -> Result<()> {
                     
                     if hasher_map.is_empty() {
                         let filename = current_file.header().filename();
-                        println!("  ... no calculated hash values available for file no {current_filenumber}: {filename}");
+                        println!("{M_NO_HASH_FOR_FILE_}{current_filenumber}: {filename}");
                         continue;
                     };
 
@@ -379,16 +378,16 @@ fn check_integrity(args: &Cli) -> Result<()> {
                         let hash1 = hasher.finalize();
                         let hash2 = current_file.footer().hash_header().hash_values().iter().find(|x| x.hash_type() == &hash_type).unwrap().hash();
                         if &hash1.to_vec() != hash2 {
-                            println!("    ... failed. Hash value-based integrity check using {hash_type} failed: incorrect hash value.");
+                            println!("{M_FAILED_INTEGRITY_CHECK_HASH_}({hash_type})");
                             hash_conflict = true;
                         }
                     }
                 }
 
                 if !hash_conflict {
-                    println!("    ... done. Hash value-based integrity checks of all object files successful. Hash values are correct.");
+                    println!("{M_SUCCESSFUL_INTEGRITY_CHECK_ALL_FILES}");
                 } else {
-                    println!("    ... failed. Hash value-based integrity checks of some object files failed: incorrect hash value(s).");
+                    println!("{M_FAILED_INTEGRITY_CHECK_ALL_FILES}");
                 }
             }
         }
@@ -412,7 +411,7 @@ fn analyze(args: &Cli) {
                 file_number +=1;
             },
             Err(err_msg) => {
-                eprintln!("{ERROR_OPEN_INPUT_FILE}{err_msg}");
+                eprintln!("{ERROR_OPEN_INPUT_FILE_}{err_msg}");
                 exit(EXIT_STATUS_ERROR);
             }
         }
@@ -426,7 +425,7 @@ fn analyze(args: &Cli) {
         let header_type = match get_header(file, args) {
             Ok(ht) => ht,
             Err(err_msg) => {
-                eprintln!("{ERROR_FILE_READ}{err_msg}");
+                eprintln!("{ERROR_FILE_READ_}{err_msg}");
                 exit(EXIT_STATUS_ERROR);
             }
         };
@@ -437,14 +436,14 @@ fn analyze(args: &Cli) {
                 let first_segment_header = match SegmentHeaderV1::decode_directly(file) {
                     Ok(header) => header,
                     Err(e) => {
-                        eprintln!("{ERROR_DECODE_SEGMENT_HEADER}1\n{e}");
+                        eprintln!("{ERROR_DECODE_SEGMENT_HEADER_}1\n{e}");
                         exit(EXIT_STATUS_ERROR);
                     }
                 };
                 let segment_information = match get_segment_information_v1(args, file, first_segment_header) {
                     Ok(seg_info) => seg_info,
                     Err(e) => {
-                        eprintln!("{ERROR_GET_SEGMENT_INFORMATION_V1}{e}");
+                        eprintln!("{ERROR_GET_SEGMENT_INFORMATION_V1_}{e}");
                         exit(EXIT_STATUS_ERROR);
                     }
                 };
@@ -477,7 +476,7 @@ fn analyze(args: &Cli) {
                 let segment_information = match get_segment_information_v1(args, file, segment_header) {
                     Ok(seg_info) => seg_info,
                     Err(e) => {
-                        eprintln!("{ERROR_GET_SEGMENT_INFORMATION_V1}{e}");
+                        eprintln!("{ERROR_GET_SEGMENT_INFORMATION_V1_}{e}");
                         exit(EXIT_STATUS_ERROR);
                     }
                 };
@@ -495,7 +494,7 @@ fn analyze(args: &Cli) {
                 let first_segment_header = match SegmentHeaderV2::decode_directly(file) {
                     Ok(header) => header,
                     Err(e) => {
-                        eprintln!("{ERROR_DECODE_SEGMENT_HEADER}2\n{e}");
+                        eprintln!("{ERROR_DECODE_SEGMENT_HEADER_}2\n{e}");
                         exit(EXIT_STATUS_ERROR);
                     }
                 };
@@ -503,7 +502,7 @@ fn analyze(args: &Cli) {
                 let segment_information = match get_segment_information_v2(args, file, first_segment_header, &mut information, &mut logical_object_footer_map) {
                     Ok(seg_info) => seg_info,
                     Err(e) => {
-                        eprintln!("{ERROR_GET_SEGMENT_INFORMATION_V2}{e}");
+                        eprintln!("{ERROR_GET_SEGMENT_INFORMATION_V2_}{e}");
                         exit(EXIT_STATUS_ERROR);
                     }
                 };
@@ -541,7 +540,7 @@ fn analyze(args: &Cli) {
                 let segment_information = match get_segment_information_v2(args, file, segment_header, &mut information, &mut logical_object_footer_map) {
                     Ok(seg_info) => seg_info,
                     Err(e) => {
-                        eprintln!("{ERROR_GET_SEGMENT_INFORMATION_V2}{e}");
+                        eprintln!("{ERROR_GET_SEGMENT_INFORMATION_V2_}{e}");
                         exit(EXIT_STATUS_ERROR);
                     }
                 };
@@ -599,6 +598,7 @@ fn analyze(args: &Cli) {
             file_header_map: HashMap::new(),
             file_footer_map: HashMap::new(),
         };
+
         for (file_number, segment_number) in logical_object_footer.file_header_segment_numbers() {
              //TODO: Error handling if verbose mode=on - or logging to STDERR?
             if let Some(offset) = logical_object_footer.file_header_offsets().get(file_number) {
@@ -661,7 +661,7 @@ fn analyze(args: &Cli) {
                     exit(EXIT_STATUS_SUCCESS);
                 },
                 Err(e) => {
-                    eprintln!("{ERROR_SERIALIZE_TOML}{e}");
+                    eprintln!("{ERROR_SERIALIZE_TOML_}{e}");
                     exit(EXIT_STATUS_ERROR);
                 }
             };
@@ -673,7 +673,7 @@ fn analyze(args: &Cli) {
                 exit(EXIT_STATUS_SUCCESS);
             },
             Err(e) => {
-                eprintln!("{ERROR_SERIALIZE_JSON}{e}");
+                eprintln!("{ERROR_SERIALIZE_JSON_}{e}");
                 exit(EXIT_STATUS_ERROR);
             }
         },
@@ -683,7 +683,7 @@ fn analyze(args: &Cli) {
                 exit(EXIT_STATUS_SUCCESS);
             },
             Err(e) => {
-                eprintln!("{ERROR_SERIALIZE_JSON}{e}");
+                eprintln!("{ERROR_SERIALIZE_JSON_}{e}");
                 exit(EXIT_STATUS_ERROR);
             }
         },
@@ -903,10 +903,10 @@ fn get_segment_information_v2(
                         }
                     }
                     if !decrypted {
-                       eprintln!("Warning: object header of object {object_number} is encrypted and not readable.") 
+                       eprintln!("{M_ENCRYPTED_OBJ_HEADER_IN_OBJ_}{object_number}.") 
                     };
                 },
-                _ => eprintln!("Error: get_object_header_information: {e}"),
+                _ => eprintln!("{ERROR_GET_OBJ_HEADER_INFORMATION_}{e}"),
             }
         }
     }
@@ -925,7 +925,7 @@ fn get_segment_information_v2(
             Err(_) => match set_object_footer_information_logical(unique_identifier, logical_object_footer_map, file, *offset, *object_number) {
                 Ok(_) => (),
                 Err(e) => {
-                    eprintln!("Error: set_object_footer_information_logical: {e}");
+                    eprintln!("{ERROR_SET_OBJ_FOOTER_INFORMATION_}{e}");
                 }
             }
         }
@@ -994,19 +994,19 @@ fn main_header(inputfile: &mut File, header_version: u8) -> Result<HeaderType> {
         1 => match MainHeaderV1::decode_directly(inputfile) {
             Ok(main_header) => Ok(HeaderType::MainHeaderV1(Box::new(main_header))),
             Err(err_msg) => {
-                eprintln!("{ERROR_PARSE_MAIN_HEADER}{err_msg}");
+                eprintln!("{ERROR_PARSE_MAIN_HEADER_}{err_msg}");
                 exit(EXIT_STATUS_ERROR);
             }
         },
         2 => match MainHeaderV2::decode_directly(inputfile) {
             Ok(main_header) => Ok(HeaderType::MainHeaderV2(main_header)),
             Err(err_msg) => {
-                eprintln!("{ERROR_PARSE_MAIN_HEADER} {err_msg}");
+                eprintln!("{ERROR_PARSE_MAIN_HEADER_} {err_msg}");
                 exit(EXIT_STATUS_ERROR);
             }
         },
         version => {
-            eprintln!("{ERROR_UNSUPPORTED_ZFF_MAIN_HEADER_VERSION}{version}");
+            eprintln!("{ERROR_UNSUPPORTED_ZFF_MAIN_HEADER_VERSION_}{version}");
             exit(EXIT_STATUS_ERROR);
         },
     }
@@ -1019,8 +1019,8 @@ fn encrypted_main_header<P: AsRef<[u8]>>(inputfile: &mut File, header_version: u
                 Ok(main_header) => Ok(HeaderType::MainHeaderV1(Box::new(main_header))),
                 Err(err) => {
                     match err.get_kind() {
-                        ZffErrorKind::PKCS5CryptoError => println!("{ERROR_PARSE_ENCRYPTED_MAIN_HEADER}{ERROR_WRONG_PASSWORD}"),
-                        _ => println!("{ERROR_PARSE_ENCRYPTED_MAIN_HEADER}{err}"),
+                        ZffErrorKind::PKCS5CryptoError => println!("{ERROR_PARSE_ENCRYPTED_MAIN_HEADER_}{ERROR_WRONG_PASSWORD}"),
+                        _ => println!("{ERROR_PARSE_ENCRYPTED_MAIN_HEADER_}{err}"),
                     };
                     exit(EXIT_STATUS_ERROR);
                 }
@@ -1029,12 +1029,12 @@ fn encrypted_main_header<P: AsRef<[u8]>>(inputfile: &mut File, header_version: u
         2 => match MainHeaderV2::decode_directly(inputfile) {
             Ok(main_header) => Ok(HeaderType::MainHeaderV2(main_header)),
             Err(err_msg) => {
-                eprintln!("{ERROR_PARSE_MAIN_HEADER} {err_msg}");
+                eprintln!("{ERROR_PARSE_MAIN_HEADER_} {err_msg}");
                 exit(EXIT_STATUS_ERROR);
             }
         },
         version => {
-            eprintln!("{ERROR_UNSUPPORTED_ZFF_MAIN_HEADER_VERSION}{version}");
+            eprintln!("{ERROR_UNSUPPORTED_ZFF_MAIN_HEADER_VERSION_}{version}");
             exit(EXIT_STATUS_ERROR);
         },
     }
@@ -1045,19 +1045,19 @@ fn segment_header(inputfile: &mut File, header_version: u8) -> Result<HeaderType
         1 => match SegmentHeaderV1::decode_directly(inputfile) {
             Ok(segment_header) => Ok(HeaderType::SegmentHeaderV1(segment_header)),
             Err(err_msg) => {
-                eprintln!("{ERROR_PARSE_SEGMENT_HEADER}{err_msg}");
+                eprintln!("{ERROR_PARSE_SEGMENT_HEADER_}{err_msg}");
                 exit(EXIT_STATUS_ERROR);
             }
         },
         2 => match SegmentHeaderV2::decode_directly(inputfile) {
             Ok(segment_header) => Ok(HeaderType::SegmentHeaderV2(segment_header)),
             Err(err_msg) => {
-                eprintln!("{ERROR_PARSE_SEGMENT_HEADER}{err_msg}");
+                eprintln!("{ERROR_PARSE_SEGMENT_HEADER_}{err_msg}");
                 exit(EXIT_STATUS_ERROR);
             }
         },
         version => {
-            eprintln!("{ERROR_UNSUPPORTED_ZFF_SEGMENT_HEADER_VERSION}{version}");
+            eprintln!("{ERROR_UNSUPPORTED_ZFF_SEGMENT_HEADER_VERSION_}{version}");
             exit(EXIT_STATUS_ERROR);
         }
     }

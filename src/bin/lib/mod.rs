@@ -66,22 +66,22 @@ impl Serialize for Information {
     where
         S: Serializer,
     {
-        let mut state = serializer.serialize_struct("Information", 6)?;
+        let mut state = serializer.serialize_struct(SER_INFORMATION, 6)?;
         match self {
-            Information::MainInformationV1(main) => state.serialize_field("Main", &main)?,
-            Information::SegmentInformation(seg) => state.serialize_field("Segment", &seg)?,
-            Information::MainHeaderInformationV2(main) => state.serialize_field("Main", &main)?,
-            Information::MainFooterInformation(main) => state.serialize_field("Main", &main)?,
+            Information::MainInformationV1(main) => state.serialize_field(SER_MAIN, &main)?,
+            Information::SegmentInformation(seg) => state.serialize_field(SER_SEGMENT, &seg)?,
+            Information::MainHeaderInformationV2(main) => state.serialize_field(SER_MAIN, &main)?,
+            Information::MainFooterInformation(main) => state.serialize_field(SER_MAIN, &main)?,
             Information::ObjectHeaderInformation(obj_header) => {
-                let key = string_to_str(format!("object_header_{}", obj_header.object_number));
+                let key = string_to_str(format!("{SER_OBJECT_HEADER}_{}", obj_header.object_number));
                 state.serialize_field(key, &obj_header)?
             },
             Information::ObjectFooterInformationLogical(obj_footer) => {
-                let key = string_to_str(format!("object_footer_{}", obj_footer.object_number));
+                let key = string_to_str(format!("{SER_OBJECT_FOOTER}_{}", obj_footer.object_number));
                 state.serialize_field(key, &obj_footer)?
             },
             Information::ObjectFooterInformationPhysical(obj_footer) => {
-                let key = string_to_str(format!("Object_footer_{}", obj_footer.object_number));
+                let key = string_to_str(format!("{SER_OBJECT_FOOTER}_{}", obj_footer.object_number));
                 state.serialize_field(key, &obj_footer)?
             },
         }
@@ -168,14 +168,14 @@ impl Serialize for MainInformationV1 {
     where
         S: Serializer,
     {
-        let mut state = serializer.serialize_struct("MainHeaderInformation", 6)?;
-        state.serialize_field("chunk_size", &format!("{} ({} bytes)", &self.chunk_size.bytes_as_hrb(), &self.chunk_size))?;
-        state.serialize_field("signature_flag", &self.signature_flag)?;
-        state.serialize_field("segment_size", &self.segment_size)?;
-        state.serialize_field("number_of_segments", &self.number_of_segments)?;
-        state.serialize_field("length_of_data", &self.length_of_data)?;
-        state.serialize_field("compression_information", &self.compression_information)?;
-        state.serialize_field("segment_information", &self.segment_information)?;
+        let mut state = serializer.serialize_struct(SER_INFORMATION, 7)?;
+        state.serialize_field(SER_CHUNK_SIZE, &format!("{} ({} {SER_BYTES})", &self.chunk_size.bytes_as_hrb(), &self.chunk_size))?;
+        state.serialize_field(SER_SIGNATURE_FLAG, &self.signature_flag)?;
+        state.serialize_field(SER_SEGMENT_SIZE, &self.segment_size)?;
+        state.serialize_field(SER_NUMBER_OF_SEGMENTS, &self.number_of_segments)?;
+        state.serialize_field(SER_LENGTH_OF_DATA, &self.length_of_data)?;
+        state.serialize_field(SER_COMPRESSION_INFORMATION, &self.compression_information)?;
+        state.serialize_field(SER_SEGMENT_INFORMATION, &self.segment_information)?;
         state.end()
     }
 }
@@ -191,11 +191,11 @@ impl Serialize for SegmentInformation {
     where
         S: Serializer,
     {
-        let mut state = serializer.serialize_struct("SegmentInformation", 6)?;
-        state.serialize_field("segment_number", &self.segment_number)?;
-        state.serialize_field("length_of_segment", &format!("{} ({} bytes)", &self.length_of_segment.bytes_as_hrb(), &self.length_of_segment))?;
+        let mut state = serializer.serialize_struct(SER_INFORMATION, 6)?;
+        state.serialize_field(SER_SEGMENT_NUMBER, &self.segment_number)?;
+        state.serialize_field(SER_LENGTH_OF_SEGMENT, &format!("{} ({} {SER_BYTES})", &self.length_of_segment.bytes_as_hrb(), &self.length_of_segment))?;
         for chunk in &self.chunk_information {
-        	state.serialize_field("chunk", &chunk)?;
+        	state.serialize_field(SER_CHUNK, &chunk)?;
         }
         state.end()
     }
@@ -213,10 +213,10 @@ impl Serialize for MainHeaderInformationV2 {
     where
         S: Serializer,
     {
-        let mut state = serializer.serialize_struct("MainHeaderInformation", 6)?;
-        state.serialize_field("chunk_size", &format!("{} ({} bytes)", &self.chunk_size.bytes_as_hrb(), &self.chunk_size))?;
-        state.serialize_field("segment_size", &format!("{} ({} bytes)", &self.segment_size.bytes_as_hrb(), &self.segment_size))?;
-        state.serialize_field("segment_information", &self.segment_information)?;
+        let mut state = serializer.serialize_struct(SER_INFORMATION, 6)?;
+        state.serialize_field(SER_CHUNK_SIZE, &format!("{} ({} {SER_BYTES})", &self.chunk_size.bytes_as_hrb(), &self.chunk_size))?;
+        state.serialize_field(SER_SEGMENT_SIZE, &format!("{} ({} {SER_BYTES})", &self.segment_size.bytes_as_hrb(), &self.segment_size))?;
+        state.serialize_field(SER_SEGMENT_INFORMATION, &self.segment_information)?;
         state.end()
     }
 }
@@ -243,10 +243,10 @@ impl Serialize for ObjectHeaderInformation {
         S: Serializer,
     {
         
-        let mut state = serializer.serialize_struct("ObjectHeaderInformation", 6)?;
-        state.serialize_field("object_number", &self.object_number)?;
-        state.serialize_field("compression_information", &self.compression_information)?;
-        state.serialize_field("object_type", &ObjectTypeInformation::from(&self.object_type))?;
+        let mut state = serializer.serialize_struct(SER_INFORMATION, 6)?;
+        state.serialize_field(SER_OBJECT_NUMBER, &self.object_number)?;
+        state.serialize_field(SER_COMPRESSION_INFORMATION, &self.compression_information)?;
+        state.serialize_field(SER_OBJECT_TYPE, &ObjectTypeInformation::from(&self.object_type))?;
         
         let description_header_information = {
             let mut new_map = HashMap::new();
@@ -254,20 +254,20 @@ impl Serialize for ObjectHeaderInformation {
                 match PredefinedDescriptionHeaderInformationKeys::from_str(key) {
                     Err(_) => { new_map.insert(key.to_string(), value); },
                     Ok(key) => match key {
-                        PredefinedDescriptionHeaderInformationKeys::CaseNumber => { new_map.insert(String::from("case_number"), value); },
-                        PredefinedDescriptionHeaderInformationKeys::EvidenceNumber => { new_map.insert(String::from("evidence_number"), value); },
-                        PredefinedDescriptionHeaderInformationKeys::ExaminerName => { new_map.insert(String::from("examiner_name"), value); },
-                        PredefinedDescriptionHeaderInformationKeys::Notes => { new_map.insert(String::from("notes"), value); },
+                        PredefinedDescriptionHeaderInformationKeys::CaseNumber => { new_map.insert(String::from(SER_CASE_NUMBER), value); },
+                        PredefinedDescriptionHeaderInformationKeys::EvidenceNumber => { new_map.insert(String::from(SER_EVIDENCE_NUMBER), value); },
+                        PredefinedDescriptionHeaderInformationKeys::ExaminerName => { new_map.insert(String::from(SER_EXAMINER_NAME), value); },
+                        PredefinedDescriptionHeaderInformationKeys::Notes => { new_map.insert(String::from(SER_NOTES), value); },
                     },
                 }
             }
             new_map
         };
-        state.serialize_field("description_information", &description_header_information)?;
-        state.serialize_field("signature_flag", &self.signature_flag.to_string())?;
+        state.serialize_field(SER_DESCRIPTION_INFORMATION, &description_header_information)?;
+        state.serialize_field(SER_SIGNATURE_FLAG, &self.signature_flag.to_string())?;
 
         if let Some(encryption_header) = &self.encryption_header {
-            state.serialize_field("encryption_information", &EncryptionHeaderInformation::from(encryption_header))?;
+            state.serialize_field(SER_ENCRYPTION_INFORMATION, &EncryptionHeaderInformation::from(encryption_header))?;
         }
 
         state.end()
@@ -285,12 +285,12 @@ impl Serialize for EncryptionHeaderInformation {
         S: Serializer,
     {
         
-        let mut state = serializer.serialize_struct("EncryptionHeaderInformation", 2)?;
-        state.serialize_field("pbe_header", &PBEHeaderInformation::from(&self.pbe_header))?;
+        let mut state = serializer.serialize_struct(SER_INFORMATION, 2)?;
+        state.serialize_field(SER_PBE_HEADER, &PBEHeaderInformation::from(&self.pbe_header))?;
         match self.encryption_algorithm {
-            EncryptionAlgorithm::AES128GCMSIV => state.serialize_field("encryption_algorithm", "AES-128-GCM-SIV")?,
-            EncryptionAlgorithm::AES256GCMSIV => state.serialize_field("encryption_algorithm", "AES-256-GCM-SIV")?,
-            _ => state.serialize_field("encryption_algorithm", "unknown_encryption_algorithm")?,
+            EncryptionAlgorithm::AES128GCMSIV => state.serialize_field(SER_ENCRYPTION_ALGORITHM, ENC_ALGO_AES128GCMSIV)?,
+            EncryptionAlgorithm::AES256GCMSIV => state.serialize_field(SER_ENCRYPTION_ALGORITHM, ENC_ALGO_AES256GCMSIV)?,
+            _ => state.serialize_field(SER_ENCRYPTION_ALGORITHM, ENC_ALGO_UNKNOWN)?,
         }
 
         state.end()
@@ -328,13 +328,13 @@ impl Serialize for PBEHeaderInformation {
         S: Serializer,
     {
         
-        let mut state = serializer.serialize_struct("PBEHeaderInformation", 4)?;
+        let mut state = serializer.serialize_struct(SER_INFORMATION, 4)?;
         let kdf_scheme = match self.kdf_scheme {
-            KDFScheme::PBKDF2SHA256 => "pbkdf2/sha256",
-            KDFScheme::Scrypt => "scrypt",
-            _ => "unknown"
+            KDFScheme::PBKDF2SHA256 => ENC_ALGO_PBKDF2_SHA256,
+            KDFScheme::Scrypt => ENC_ALGO_SCRYPT,
+            _ => ENC_ALGO_UNKNOWN
         };
-        state.serialize_field("kdf_scheme", &kdf_scheme)?;
+        state.serialize_field(SER_KDF_SCHEME, &kdf_scheme)?;
 
         state.end()
     }
@@ -377,37 +377,37 @@ impl Serialize for ObjectFooterInformationPhysical {
         S: Serializer,
     {
     	//unwrap should be safe here, because the format string was tested.
-    	let format = format_description::parse("[year]-[month]-[day] [hour]:[minute]:[second] UTC").unwrap();
+    	let format = format_description::parse(DEFAULT_DATE_FORMAT).unwrap();
 
-        let mut state = serializer.serialize_struct("ObjectFooterInformationPhysical", 6)?;
+        let mut state = serializer.serialize_struct(SER_INFORMATION, 6)?;
 
     	//acquisition start
     	if let Ok(dt) = OffsetDateTime::from_unix_timestamp(self.acquisition_start as i64) {
     		if let Ok(formatted_dt) = dt.format(&format) {
-    			state.serialize_field("acquisition_start", &formatted_dt)?;
+    			state.serialize_field(SER_ACQUISITION_START, &formatted_dt)?;
     		} else {
-    			state.serialize_field("acquisition_start", &self.acquisition_start)?;
+    			state.serialize_field(SER_ACQUISITION_START, &self.acquisition_start)?;
     		}
     	} else {
-    		state.serialize_field("acquisition_start", &self.acquisition_start)?;
+    		state.serialize_field(SER_ACQUISITION_START, &self.acquisition_start)?;
     	};
 
     	//acquisition end
     	if let Ok(dt) = OffsetDateTime::from_unix_timestamp(self.acquisition_end as i64) {
     		if let Ok(formatted_dt) = dt.format(&format) {
-    			state.serialize_field("acquisition_end", &formatted_dt)?;
+    			state.serialize_field(SER_ACQUISITION_END, &formatted_dt)?;
     		} else {
-    			state.serialize_field("acquisition_end", &self.acquisition_end)?;
+    			state.serialize_field(SER_ACQUISITION_END, &self.acquisition_end)?;
     		}
     	} else {
-    		state.serialize_field("acquisition_end", &self.acquisition_end)?;
+    		state.serialize_field(SER_ACQUISITION_END, &self.acquisition_end)?;
     	};
 
-        state.serialize_field("objectnumber", &self.object_number)?;
-        state.serialize_field("length_of_data", &format!("{} ({} bytes)", &self.length_of_data.bytes_as_hrb(), &self.length_of_data))?;
-        state.serialize_field("number_of_chunks", &self.number_of_chunks)?;
+        state.serialize_field(SER_OBJECT_NUMBER, &self.object_number)?;
+        state.serialize_field(SER_LENGTH_OF_DATA, &format!("{} ({} {SER_BYTES})", &self.length_of_data.bytes_as_hrb(), &self.length_of_data))?;
+        state.serialize_field(SER_NUMBER_OF_CHUNKS, &self.number_of_chunks)?;
         for hash_info in &self.hash_information {
-        	state.serialize_field("hash_information", &hash_info)?;
+        	state.serialize_field(SER_HASH_INFORMATION, &hash_info)?;
         };
 
         state.end()
@@ -426,8 +426,8 @@ impl Serialize for ObjectFooterInformationLogical {
     where
         S: Serializer,
     {
-        let mut state = serializer.serialize_struct("ObjectFooterInformationLogical", 6)?;
-        state.serialize_field("objectnumber", &self.object_number)?;
+        let mut state = serializer.serialize_struct(SER_INFORMATION, 6)?;
+        state.serialize_field(SER_OBJECT_NUMBER, &self.object_number)?;
         let mut stringified_file_header_map = HashMap::new();
         for (file_number, file_header) in &self.file_header_map {
             stringified_file_header_map.insert(file_number.to_string(), file_header);
@@ -437,8 +437,8 @@ impl Serialize for ObjectFooterInformationLogical {
             stringified_file_footer_map.insert(file_number.to_string(), file_footer);
         };
 
-        state.serialize_field("fileheader", &stringified_file_header_map)?;
-        state.serialize_field("filefooter", &stringified_file_footer_map)?;
+        state.serialize_field(SER_FILE_HEADER, &stringified_file_header_map)?;
+        state.serialize_field(SER_FILE_FOOTER, &stringified_file_footer_map)?;
 
         state.end()
     }
@@ -453,7 +453,7 @@ impl Serialize for DescriptionHeaderInformation {
     where
         S: Serializer,
     {
-        let mut state = serializer.serialize_struct("DescriptionHeaderInformation", 6)?;
+        let mut state = serializer.serialize_struct(SER_INFORMATION, 6)?;
         for (key, value) in &self.information {
             let key = string_to_str(key.to_string());
             state.serialize_field(key, &value)?;
@@ -481,59 +481,59 @@ impl Serialize for FileHeaderInformation {
         S: Serializer,
     {
     	//unwrap should be safe here, because the format string was tested.
-    	let format = format_description::parse("[year]-[month]-[day] [hour]:[minute]:[second] UTC").unwrap();
+    	let format = format_description::parse(DEFAULT_DATE_FORMAT).unwrap();
 
-        let mut state = serializer.serialize_struct("FileHeaderInformation", 6)?;
+        let mut state = serializer.serialize_struct(SER_INFORMATION, 6)?;
 
-        state.serialize_field("filetype", &FileTypeInformation::from(&self.file_type))?;
-		state.serialize_field("filename", &self.filename)?;
-		state.serialize_field("parent_filenumber", &self.parent_file_number)?;
+        state.serialize_field(SER_FILETYPE, &FileTypeInformation::from(&self.file_type))?;
+		state.serialize_field(SER_FILENAME, &self.filename)?;
+		state.serialize_field(SER_PARENTFILENUMBER, &self.parent_file_number)?;
 
     	//atime
     	if let Ok(dt) = OffsetDateTime::from_unix_timestamp(self.atime as i64) {
     		if let Ok(formatted_dt) = dt.format(&format) {
-    			state.serialize_field("atime", &formatted_dt)?;
+    			state.serialize_field(SER_TIME_ATIME, &formatted_dt)?;
     		} else {
-    			state.serialize_field("atime", &self.atime)?;
+    			state.serialize_field(SER_TIME_ATIME, &self.atime)?;
     		}
     	} else {
-    		state.serialize_field("atime", &self.atime)?;
+    		state.serialize_field(SER_TIME_ATIME, &self.atime)?;
     	};
 
     	//mtime
     	if let Ok(dt) = OffsetDateTime::from_unix_timestamp(self.mtime as i64) {
     		if let Ok(formatted_dt) = dt.format(&format) {
-    			state.serialize_field("mtime", &formatted_dt)?;
+    			state.serialize_field(SER_TIME_MTIME, &formatted_dt)?;
     		} else {
-    			state.serialize_field("mtime", &self.mtime)?;
+    			state.serialize_field(SER_TIME_MTIME, &self.mtime)?;
     		}
     	} else {
-    		state.serialize_field("mtime", &self.mtime)?;
+    		state.serialize_field(SER_TIME_MTIME, &self.mtime)?;
     	};
 
     	//ctime
     	if let Ok(dt) = OffsetDateTime::from_unix_timestamp(self.ctime as i64) {
     		if let Ok(formatted_dt) = dt.format(&format) {
-    			state.serialize_field("ctime", &formatted_dt)?;
+    			state.serialize_field(SER_TIME_CTIME, &formatted_dt)?;
     		} else {
-    			state.serialize_field("ctime", &self.ctime)?;
+    			state.serialize_field(SER_TIME_CTIME, &self.ctime)?;
     		}
     	} else {
-    		state.serialize_field("ctime", &self.ctime)?;
+    		state.serialize_field(SER_TIME_CTIME, &self.ctime)?;
     	};
 
     	//btime
     	if let Ok(dt) = OffsetDateTime::from_unix_timestamp(self.btime as i64) {
     		if let Ok(formatted_dt) = dt.format(&format) {
-    			state.serialize_field("btime", &formatted_dt)?;
+    			state.serialize_field(SER_TIME_BTIME, &formatted_dt)?;
     		} else {
-    			state.serialize_field("btime", &self.btime)?;
+    			state.serialize_field(SER_TIME_BTIME, &self.btime)?;
     		}
     	} else {
-    		state.serialize_field("btime", &self.btime)?;
+    		state.serialize_field(SER_TIME_BTIME, &self.btime)?;
     	};
 
-    	state.serialize_field("metadata_extended_information", &self.metadata_extended_information)?;
+    	state.serialize_field(SER_METADATA_EXTENDED_INFORMATION, &self.metadata_extended_information)?;
 
         state.end()
     }
@@ -554,35 +554,35 @@ impl Serialize for FileFooterInformation {
         S: Serializer,
     {
     	//unwrap should be safe here, because the format string was tested.
-    	let format = format_description::parse("[year]-[month]-[day] [hour]:[minute]:[second] UTC").unwrap();
+    	let format = format_description::parse(DEFAULT_DATE_FORMAT).unwrap();
 
-        let mut state = serializer.serialize_struct("FileFooterInformation", 6)?;
+        let mut state = serializer.serialize_struct(SER_INFORMATION, 6)?;
 
     	//acquisition start
     	if let Ok(dt) = OffsetDateTime::from_unix_timestamp(self.acquisition_start as i64) {
     		if let Ok(formatted_dt) = dt.format(&format) {
-    			state.serialize_field("acquisition_start", &formatted_dt)?;
+    			state.serialize_field(SER_ACQUISITION_START, &formatted_dt)?;
     		} else {
-    			state.serialize_field("acquisition_start", &self.acquisition_start)?;
+    			state.serialize_field(SER_ACQUISITION_START, &self.acquisition_start)?;
     		}
     	} else {
-    		state.serialize_field("acquisition_start", &self.acquisition_start)?;
+    		state.serialize_field(SER_ACQUISITION_START, &self.acquisition_start)?;
     	};
 
     	//acquisition end
     	if let Ok(dt) = OffsetDateTime::from_unix_timestamp(self.acquisition_end as i64) {
     		if let Ok(formatted_dt) = dt.format(&format) {
-    			state.serialize_field("acquisition_end", &formatted_dt)?;
+    			state.serialize_field(SER_ACQUISITION_END, &formatted_dt)?;
     		} else {
-    			state.serialize_field("acquisition_end", &self.acquisition_end)?;
+    			state.serialize_field(SER_ACQUISITION_END, &self.acquisition_end)?;
     		}
     	} else {
-    		state.serialize_field("acquisition_end", &self.acquisition_end)?;
+    		state.serialize_field(SER_ACQUISITION_END, &self.acquisition_end)?;
     	};
-        state.serialize_field("length_of_data", &format!("{} ({} bytes)", &self.length_of_data.bytes_as_hrb(), &self.length_of_data))?;
-        state.serialize_field("number_of_chunks", &self.number_of_chunks)?;
+        state.serialize_field(SER_LENGTH_OF_DATA, &format!("{} ({} bytes)", &self.length_of_data.bytes_as_hrb(), &self.length_of_data))?;
+        state.serialize_field(SER_NUMBER_OF_CHUNKS, &self.number_of_chunks)?;
         for hash_info in &self.hash_information {
-        	state.serialize_field("hash_information", &hash_info)?;
+        	state.serialize_field(SER_HASH_INFORMATION, &hash_info)?;
         };
         state.end()
     }
@@ -607,11 +607,11 @@ impl Serialize for HashInformation {
     where
         S: Serializer,
     {
-        let mut state = serializer.serialize_struct("HashInformation", 3)?;
-        state.serialize_field("hash_type", &self.hash_type.to_string())?;
-        state.serialize_field("hash", &self.hash.encode_hex::<String>())?;
+        let mut state = serializer.serialize_struct(SER_INFORMATION, 3)?;
+        state.serialize_field(SER_HASH_TYPE, &self.hash_type.to_string())?;
+        state.serialize_field(SER_HASH, &self.hash.encode_hex::<String>())?;
         if let Some(signature) = &self.ed25519_signature {
-        	state.serialize_field("signature", &base64::encode(signature))?;
+        	state.serialize_field(SER_SIGNATURE, &base64::encode(signature))?;
         }
         state.end()
     }
@@ -631,14 +631,14 @@ impl Serialize for ChunkInformation {
     where
         S: Serializer,
     {
-        let mut state = serializer.serialize_struct("ChunkInformation", 6)?;
-        state.serialize_field("chunk_number", &self.chunk_number)?;
-        state.serialize_field("chunk_size", &format!("{} ({} bytes)", &self.chunk_size.bytes_as_hrb(), &self.chunk_size))?;
-        state.serialize_field("crc32", &self.crc32.to_string().encode_hex::<String>())?;
-        state.serialize_field("error_flag", &self.error_flag)?;
-        state.serialize_field("compression_flag", &self.compression_flag)?;
+        let mut state = serializer.serialize_struct(SER_INFORMATION, 6)?;
+        state.serialize_field(SER_CHUNK_NUMBER, &self.chunk_number)?;
+        state.serialize_field(SER_CHUNK_SIZE, &format!("{} ({}  {SER_BYTES})", &self.chunk_size.bytes_as_hrb(), &self.chunk_size))?;
+        state.serialize_field(SER_CRC32, &self.crc32.to_string().encode_hex::<String>())?;
+        state.serialize_field(SER_ERROR_FLAG, &self.error_flag)?;
+        state.serialize_field(SER_COMPRESSION_FLAG, &self.compression_flag)?;
         if let Some(signature) = &self.ed25519_signature {
-        	state.serialize_field("signature", &base64::encode(signature))?;
+        	state.serialize_field(SER_SIGNATURE, &base64::encode(signature))?;
         }
         state.end()
     }
