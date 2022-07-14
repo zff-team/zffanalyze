@@ -39,27 +39,27 @@ use clap::{Parser, ArgEnum};
 struct Cli {
 
     /// The input files. This should be your zff image files. You can use this Option multiple times.
-    #[clap(short=INPUTFILES_SHORT, long=INPUTFILES_LONG, multiple_values=true)]
+    #[clap(short='i', long="inputfiles", multiple_values=true)]
     inputfiles: Vec<String>,
 
     /// The output format.
-    #[clap(short=OUTPUT_FORMAT_SHORT, long=OUTPUT_FORMAT_LONG, arg_enum, default_value=DEFAULT_OUPUT_FORMAT)]
+    #[clap(short='f', long="output-format", arg_enum, default_value="toml")]
     output_format: OutputFormat,
 
     /// Verbose mode to show each chunk information.
-    #[clap(short=VERBOSE_SHORT, long=VERBOSE_LONG)]
+    #[clap(short='v', long="verbose")]
     verbose: bool,
 
     /// The password(s), if the file(s) are encrypted. You can use this option multiple times to enter different passwords for different objects.
-    #[clap(short=DECRPYTION_PASSWORDS_SHORT, long=DECRPYTION_PASSWORDS_LONG, multiple_values=true)]
+    #[clap(short='p', long="decryption-passwords", multiple_values=true)]
     decryption_passwords: Vec<String>,
 
     /// The public sign key to verify the appropriate signatures.
-    #[clap(short=PUBLIC_KEY_SHORT, long=PUBLIC_KEY_LONG)]
+    #[clap(short='k', long="pub-key")]
     public_key: Option<String>,
 
     /// Checks the integrity of the imaged data by calculating/comparing the used hash values.
-    #[clap(short=INTEGRITY_CHECKS_SHORT, long=INTEGRITY_CHECKS_LONG)]
+    #[clap(short='c', long="integrity-check")]
     check_integrity: bool,
 }
 

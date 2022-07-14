@@ -121,24 +121,3 @@ pub(crate) const ENC_ALGO_SCRYPT: &str = "scrypt";
 
 
 pub(crate) const ENC_ALGO_UNKNOWN: &str = "unknown_encryption_algorithm";
-
-
-// clap constants
-pub(crate) const INPUTFILES_SHORT: char = 'i';
-pub(crate) const INPUTFILES_LONG: &str = "inputfiles";
-
-pub(crate) const OUTPUT_FORMAT_SHORT: char = 'f';
-pub(crate) const OUTPUT_FORMAT_LONG: &str = "output-format";
-pub(crate) const DEFAULT_OUPUT_FORMAT: &str = "toml";
-
-pub(crate) const VERBOSE_SHORT: char = 'v';
-pub(crate) const VERBOSE_LONG: &str = "verbose";
-
-pub(crate) const DECRPYTION_PASSWORDS_SHORT: char = 'p';
-pub(crate) const DECRPYTION_PASSWORDS_LONG: &str = "decryption-passwords";
-
-pub(crate) const PUBLIC_KEY_SHORT: char = 'k';
-pub(crate) const PUBLIC_KEY_LONG: &str = "pub-key";
-
-pub(crate) const INTEGRITY_CHECKS_SHORT: char = 'c';
-pub(crate) const INTEGRITY_CHECKS_LONG: &str = "integrity-check";
