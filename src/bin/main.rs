@@ -43,7 +43,7 @@ struct Cli {
 
     /// The input files. This should be your zff image files. You can use this Option multiple times.
     #[clap(short='i', long="inputfiles", multiple_values=true)]
-    inputfiles: Vec<PathBuf>,
+    inputfiles: Vec<String>,
 
     /// The output format.
     #[clap(short='f', long="output-format", arg_enum, default_value="toml")]
@@ -83,7 +83,6 @@ enum HeaderType {
 fn main() {
     let args = Cli::parse();
     let inputfiles = args.inputfiles.iter().map(|x| concat_prefix_path(INPUTFILES_PATH_PREFIX ,x)).collect();
-    println!("{:?}", inputfiles);
 
     if args.check_integrity {
         match check_integrity(&args, &inputfiles) {

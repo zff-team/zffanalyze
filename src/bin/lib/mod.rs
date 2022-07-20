@@ -26,9 +26,9 @@ use zff::{
 use crate::constants::*;
 use traits::*;
 
-pub fn concat_prefix_path<P: Into<String>>(prefix: P, path: &PathBuf) -> PathBuf {
+pub fn concat_prefix_path<P: Into<String>, S: Into<String>>(prefix: P, path: S) -> PathBuf {
     let mut new_path = PathBuf::from(prefix.into());
-    new_path.push(path);
+    new_path.push(path.into());
     new_path
 }
 
