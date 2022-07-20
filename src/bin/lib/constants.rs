@@ -1,3 +1,6 @@
+// External
+pub(crate) const INPUTFILES_PATH_PREFIX: &str = "";
+
 // Error messages
 pub(crate) const ERROR_OPEN_INPUT_FILE_: &str = "An error occurred while trying to open the input file: ";
 pub(crate) const ERROR_FILE_READ_: &str = "An error occurred while trying to read the input file: ";

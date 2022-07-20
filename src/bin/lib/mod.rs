@@ -1,4 +1,5 @@
 // - STD
+use std::path::PathBuf;
 use std::str::FromStr;
 use std::collections::HashMap;
 
@@ -24,6 +25,12 @@ use zff::{
 };
 use crate::constants::*;
 use traits::*;
+
+pub fn concat_prefix_path<P: Into<String>>(prefix: P, path: &PathBuf) -> PathBuf {
+    let mut new_path = PathBuf::from(prefix.into());
+    new_path.push(path);
+    new_path
+}
 
 fn string_to_str(s: String) -> &'static str {
   Box::leak(s.into_boxed_str())

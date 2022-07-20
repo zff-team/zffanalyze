@@ -3,6 +3,7 @@
 
 // - STD
 use std::fs::{File};
+use std::path::PathBuf;
 
 use std::process::exit;
 use std::io::{Seek, Read, SeekFrom};
@@ -15,6 +16,8 @@ mod lib;
 // - internal
 use lib::*;
 use lib::constants::*;
+
+
 use zff::{
     Result,
     constants::*,
@@ -40,7 +43,7 @@ struct Cli {
 
     /// The input files. This should be your zff image files. You can use this Option multiple times.
     #[clap(short='i', long="inputfiles", multiple_values=true)]
-    inputfiles: Vec<String>,
+    inputfiles: Vec<PathBuf>,
 
     /// The output format.
     #[clap(short='f', long="output-format", arg_enum, default_value="toml")]
@@ -79,8 +82,11 @@ enum HeaderType {
 
 fn main() {
     let args = Cli::parse();
+    let inputfiles = args.inputfiles.iter().map(|x| concat_prefix_path(INPUTFILES_PATH_PREFIX ,x)).collect();
+    println!("{:?}", inputfiles);
+
     if args.check_integrity {
-        match check_integrity(&args) {
+        match check_integrity(&args, &inputfiles) {
             Ok(_) => exit(EXIT_STATUS_SUCCESS),
             Err(e) => {
                 eprintln!("{ERROR_TRYING_CALCULATE_HASHES_}{e}");
@@ -90,7 +96,7 @@ fn main() {
     }
 
     if let Some(ref public_key) = args.public_key {
-         match check_signatures(&args, public_key) {
+         match check_signatures(&args, public_key, &inputfiles) {
             Ok(_) => exit(EXIT_STATUS_SUCCESS),
             Err(e) => {
                 eprintln!("{ERROR_TRYING_VERIFY_SIGNATURES_}{e}");
@@ -104,9 +110,9 @@ fn main() {
     }
 }
 
-fn gen_password_per_object_map(args: &Cli) -> Result<HashMap<u64, String>> {
+fn gen_password_per_object_map(args: &Cli, inputfiles: &Vec<PathBuf>) -> Result<HashMap<u64, String>> {
     let mut files = Vec::new();
-    for path in &args.inputfiles {
+    for path in inputfiles {
      let f = File::open(&path)?;
         files.push(f);
     };
@@ -149,14 +155,14 @@ fn gen_password_per_object_map(args: &Cli) -> Result<HashMap<u64, String>> {
     Ok(passwords_per_object)
 }
 
-fn check_signatures(args: &Cli, public_key: &str) -> Result<()> {
+fn check_signatures(args: &Cli, public_key: &str, inputfiles: &Vec<PathBuf>) -> Result<()> {
     let mut files = Vec::new();
-    for path in &args.inputfiles {
+    for path in inputfiles {
         let f = File::open(&path)?;
         files.push(f);
     };
 
-    let mut zffreader = ZffReader::new(files, gen_password_per_object_map(args)?)?;
+    let mut zffreader = ZffReader::new(files, gen_password_per_object_map(args, inputfiles)?)?;
 
     let object_numbers = zffreader.object_numbers();
 
@@ -260,14 +266,14 @@ fn check_signatures(args: &Cli, public_key: &str) -> Result<()> {
 }
 
 //TODO: implement multi threading for this function
-fn check_integrity(args: &Cli) -> Result<()> {
+fn check_integrity(args: &Cli, inputfiles: &Vec<PathBuf>) -> Result<()> {
     let mut files = Vec::new();
-    for path in &args.inputfiles {
+    for path in inputfiles {
         let f = File::open(&path)?;
         files.push(f);
     };
 
-    let mut zffreader = ZffReader::new(files, gen_password_per_object_map(args)?)?;
+    let mut zffreader = ZffReader::new(files, gen_password_per_object_map(args, inputfiles)?)?;
 
     let object_numbers = zffreader.object_numbers();
 
