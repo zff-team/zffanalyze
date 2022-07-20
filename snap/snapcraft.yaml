@@ -16,13 +16,14 @@ parts:
   zffanalyze:
     build-packages: [ gcc ]
     plugin: rust
-    source: https://github.com/ph0llux/zffanalyze.git
+    source: .
     override-pull: |
       snapcraftctl pull
       VERSION="$(git describe --tags --abbrev=0)"
       [ -n "$(echo $VERSION)" ] && GRADE=stable
       snapcraftctl set-version "$VERSION"
       snapcraftctl set-grade "$GRADE"
+      patch -d src/bin/lib < /root/project/snap/local/constants_snap_hostfs_prefix.patch
 apps:
   zffanalyze:
     command: bin/zffanalyze

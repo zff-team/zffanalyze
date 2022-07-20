@@ -28,6 +28,8 @@ pub(crate) const ERROR_UNEXPECTED_PUBKEY_LENGTH: &str = "public_key has an unexp
 pub(crate) const ERROR_PER_CHUNK_SIGS_NO_SIGS_FOUND: &str = "Could not verify per chunk signatures: no signatures found.";
 pub(crate) const ERROR_GET_OBJ_HEADER_INFORMATION_: &str = "Error: get_object_header_information: ";
 pub(crate) const ERROR_SET_OBJ_FOOTER_INFORMATION_: &str = "Error: set_object_footer_information_logical: ";
+pub(crate) const ERROR_CANONICALIZE_INPUT_FILE_: &str = "An error occurred while trying to canonicalize following inputfile: ";
+pub(crate) const ERROR_STRIPPING_PREFIX_INPUT_FILE_: &str = "An error occurred while trying to stripping the path-prefix of following inputfile: ";
 
 // Other messages
 pub(crate) const HINT_BAD_PASSWORD: &str = "bad or missing password(s)?";
@@ -124,3 +126,8 @@ pub(crate) const ENC_ALGO_SCRYPT: &str = "scrypt";
 
 
 pub(crate) const ENC_ALGO_UNKNOWN: &str = "unknown_encryption_algorithm";
+
+
+// Other
+#[cfg(target_family = "unix")]
+pub(crate) const UNIX_BASE: &str = "/";

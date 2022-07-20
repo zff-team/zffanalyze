@@ -1,4 +1,5 @@
 // - STD
+use std::process::exit;
 use std::path::PathBuf;
 use std::str::FromStr;
 use std::collections::HashMap;
@@ -26,10 +27,34 @@ use zff::{
 use crate::constants::*;
 use traits::*;
 
+// workaround to enable the correct construction of snap packages. Will be replaced by something more elegant in the future.
+#[cfg(target_family = "unix")]
 pub fn concat_prefix_path<P: Into<String>, S: Into<String>>(prefix: P, path: S) -> PathBuf {
     let mut new_path = PathBuf::from(prefix.into());
-    new_path.push(path.into());
-    new_path
+    let path = path.into();
+
+    let canonicalized_path = match PathBuf::from(&path).canonicalize() {
+        Ok(path) => path,
+        Err(e) => {
+            eprintln!("{ERROR_CANONICALIZE_INPUT_FILE_}{path} - {e}");
+            exit(EXIT_STATUS_ERROR);
+        }
+    };
+    match canonicalized_path.strip_prefix(UNIX_BASE) {
+        Ok(path) => {
+            new_path.push(path);
+            new_path
+        },
+        Err(e) => {
+            eprintln!("{ERROR_STRIPPING_PREFIX_INPUT_FILE_}{path} - {e}");
+            exit(EXIT_STATUS_ERROR);
+        }
+    }
+}
+
+#[cfg(target_family = "windows")]
+pub fn concat_prefix_path<P: Into<String>, S: Into<String>>(prefix: P, path: S) -> PathBuf {
+    PathBuf::from(path.into())
 }
 
 fn string_to_str(s: String) -> &'static str {
