@@ -16,7 +16,7 @@ parts:
   zffanalyze:
     build-packages: [ gcc ]
     plugin: rust
-    source: .
+    source: https://github.com/ph0llux/zffanalyze.git
     override-pull: |
       snapcraftctl pull
       VERSION="$(git describe --tags --abbrev=0)"
