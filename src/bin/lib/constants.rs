@@ -41,7 +41,7 @@ pub(crate) const M_INVALID_SIGS_FOR_CHUNKS_: &str = "    ... invalid signatures 
 
 pub(crate) const M_NO_SIGS_FOUND_FOR_: &str ="    ... no signatures found for ";
 pub(crate) const M_VALID_SIG_FOR_: &str = "    ... valid signature for ";
-pub(crate) const M_INVALID_SIG_FOR_: &str = "    ... invalid signature for ";
+pub(crate) const M_INVALID_SIG_FOR_: &str = "    ... invalid signature (or wrong public key?) for ";
 pub(crate) const M_NO_HASHES_CALCULATED_IN_OBJ: &str = "    ... no hashes calculated in this object.";
 pub(crate) const M_NO_SIGS_FOR_HASHES_OF_FILE_: &str = "    ... no hash signatures found for file ";
 pub(crate) const M_INVALID_HASH_SIG_OF_FILE_: &str = "    ... invalid hash signature for file ";
