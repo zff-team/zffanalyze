@@ -27,4 +27,17 @@ $ cargo install zffanalyze
 
 # Usage
 
-Use ```zffanalyze -i <YOUR_ZFF_IMAGE.z01>``` show the metadata of the given zff file.
+To show the metadata of the given zff file, execute:
+```bash
+zffanalyze -i <YOUR_ZFF_IMAGE.z01>
+```
+
+If you want to perform an integrity check, you can simply execute:
+```bash
+zffanalyze -i <YOUR_ZFF_IMAGE.z01> -c
+```
+
+If you want to determine the authenticity of the data with an existing public key, then execute:
+```bash
+zffanalyze -i <YOUR_ZFF_IMAGE.z01> -k "c9IvuVj4lnGVSXR5Azx8SAyqQBpeHMKpB/4v8/Cj4Ew="
+```
