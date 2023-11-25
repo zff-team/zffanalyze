@@ -2,7 +2,7 @@
 +++ patch_constants_snap_hostfs_prefix.rs	2022-07-20 23:50:09.282598492 +0200
 @@ -1,5 +1,5 @@
  // External
--pub(crate) const INPUTFILES_PATH_PREFIX: &str = "";
+-pub(crate) const INPUTFILES_PATH_PREFIX: &str = "/";
 +pub(crate) const INPUTFILES_PATH_PREFIX: &str = "/var/lib/snapd/hostfs";
  
  // Error messages
