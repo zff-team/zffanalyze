@@ -15,7 +15,7 @@ use res::constants::*;
 
 use zff::{
     Result,
-    header::{SegmentHeader, ObjectHeader, EncryptedObjectHeader, FileHeader,},
+    header::{SegmentHeader, ObjectHeader, EncryptedObjectHeader, FileHeader, ChunkMap},
     footer::{SegmentFooter, MainFooter, ObjectFooter, EncryptedObjectFooter, FileFooter},
     HeaderCoding,
 };
@@ -38,6 +38,9 @@ struct Cli {
     output_format: OutputFormat,
 
     /// Verbose mode to show more information. Can be used multiple times.
+    /// Use the option one time to print also the chunk maps  
+    /// Use the option two times to print also the chunk maps and logical file information (for each file!)
+    /// Use the option three times to print also the chunk maps, the logical file information and the chunk header information (for each chunk!)
     #[arg(short='v', long="verbose", action = clap::ArgAction::Count)]
     verbose: u8,
 
@@ -109,36 +112,47 @@ fn main() {
         }
     };
 
+    print_serialized_data(&args, &container_info);
+
+
+    exit(EXIT_STATUS_SUCCESS);
+}
+
+fn print_serialized_data<D: Serialize + std::fmt::Debug>(args: &Cli, data: D) {
     match args.output_format {
         OutputFormat::Toml => {
-            match toml::to_string(&container_info) {
+            match toml::to_string(&data) {
                 Ok(toml) => println!("{toml}"),
                 Err(e) => {
-                    error!("An error occurred while trying to serialize the container information: {e}");
-                    debug!("{:?}", container_info);
+                    error!("An error occurred while trying to serialize data: {e}");
+                    debug!("{:?}", data);
                 }
             }
         }
         OutputFormat::Json => {
-            match serde_json::to_string(&container_info) {
+            match serde_json::to_string(&data) {
                 Ok(json) => println!("{json}"),
                 Err(e) => {
-                    error!("An error occurred while trying to serialize the container information: {e}");
-                    debug!("{:?}", container_info);
+                    error!("An error occurred while trying to serialize data: {e}");
+                    debug!("{:?}", data);
                 }
             }
         }
         OutputFormat::JsonPretty => {
-            match serde_json::to_string_pretty(&container_info) {
+            match serde_json::to_string_pretty(&data) {
                 Ok(json) => println!("{json}"),
                 Err(e) => {
-                    error!("An error occurred while trying to serialize the container information: {e}");
-                    debug!("{:?}", container_info);
+                    error!("An error occurred while trying to serialize data: {e}");
+                    debug!("{:?}", data);
                 }
             }
         }
     }
-    exit(EXIT_STATUS_SUCCESS);
+}
+
+fn get_chunkmap<R: Read + Seek>(reader: &mut R, offset: u64) -> Result<ChunkMap> {
+    reader.seek(SeekFrom::Start(offset))?;
+    ChunkMap::decode_directly(reader)
 }
 
 fn read_segments(inputfiles: &Vec<PathBuf>, args: &Cli) -> Result<ContainerInfo> {
@@ -165,18 +179,30 @@ fn read_segments(inputfiles: &Vec<PathBuf>, args: &Cli) -> Result<ContainerInfo>
             Footer::Segment(segment_footer) => segment_footer,
         };
         let seg_no = segment_header.segment_number;
+
+        // add chunkmaps to segment info, if verbose mode is set at leat one time.
+        let mut chunkmaps = Vec::new();
+        if args.verbose >= 1 {
+            for chunkmap_offset in segment_footer.chunk_map_table.values() {
+                let chunkmap = get_chunkmap(&mut file, *chunkmap_offset)?;
+                chunkmaps.push(chunkmap);
+            }
+        }
+
         let seg_info = SegmentInfo {
             header: segment_header,
-            footer: segment_footer
+            footer: segment_footer,
+            chunkmaps,
         };
+
         reader.insert(seg_no, file);
         segments.insert(seg_no, seg_info);
     }
 
     let mut objects = read_objects(&mut segments, &mut reader)?;
 
-    // add file_info to object info, if verbose mode is set at least one time.
-    if args.verbose >= 1 {
+    // add file_info to object info, if verbose mode is set at least two times.
+    if args.verbose >= 2 {
         for object_info in objects.values_mut() {
             read_files(object_info, &mut reader)?;
         }

@@ -48,6 +48,7 @@ pub(crate) const SER_FIELD_SEGMENT_NUMBER: &str = "segment_number";
 pub(crate) const SER_FIELD_CHUNKMAP_SIZE: &str = "target_chunkmap_size";
 pub(crate) const SER_FIELD_LENGTH_OF_SEGMENT: &str = "length_of_segment";
 pub(crate) const SER_NUMBER_OF_CHUNKMAPS: &str = "number_of_chunkmaps";
+pub(crate) const SER_FIELD_CHUNKMAP: &str = "chunkmap";
 pub(crate) const SER_FIELD_NUMBER_OF_SEGMENTS: &str = "total_number_of_segments";
 pub(crate) const SER_FIELD_DESCRIPTION_NOTE: &str = "description_note";
 pub(crate) const SER_FIELD_FILE: &str = "file";

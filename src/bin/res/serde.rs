@@ -146,6 +146,7 @@ impl Serialize for ContainerInfo {
 pub(crate) struct SegmentInfo {
     pub header: SegmentHeader,
     pub footer: SegmentFooter,
+    pub chunkmaps: Vec<ChunkMap>
 }
 
 impl Serialize for SegmentInfo {
@@ -162,6 +163,9 @@ impl Serialize for SegmentInfo {
         state.serialize_field(SER_FIELD_LENGTH_OF_SEGMENT, &self.footer.length_of_segment)?;
         state.serialize_field(SER_FIELD_FIRST_CHUNK_NUMBER, &self.footer.first_chunk_number)?;
         state.serialize_field(SER_NUMBER_OF_CHUNKMAPS, &self.footer.chunk_map_table.keys().len())?;
+        if !self.chunkmaps.is_empty() {
+            state.serialize_field(SER_FIELD_CHUNKMAP, &self.chunkmaps)?;
+        }
         state.end()
     }
 }
