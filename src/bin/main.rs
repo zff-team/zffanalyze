@@ -1,5 +1,5 @@
 // - STD
-use std::fs::{File};
+use std::fs::File;
 use std::path::PathBuf;
 use std::process::exit;
 use std::io::{Seek, SeekFrom, Read};
@@ -23,7 +23,7 @@ use zff::{
 // - external
 use clap::{Parser, ValueEnum};
 use log::{LevelFilter, error, warn, debug};
-use serde::{Serialize};
+use serde::Serialize;
 
 #[derive(Parser)]
 #[clap(about, version, author)]
@@ -112,7 +112,7 @@ fn main() {
         }
     };
 
-    print_serialized_data(&args, &container_info);
+    print_serialized_data(&args, container_info);
 
 
     exit(EXIT_STATUS_SUCCESS);
@@ -213,9 +213,9 @@ fn read_segments(inputfiles: &Vec<PathBuf>, args: &Cli) -> Result<ContainerInfo>
     }
 
     Ok(ContainerInfo {
-        main_footer: main_footer,
-        segments: segments,
-        objects: objects,
+        main_footer,
+        segments,
+        objects,
     })
 }
 
@@ -229,7 +229,7 @@ fn read_objects<R: Read + Seek>(
     let mut objects = BTreeMap::new();
 
     for (seg_no, seg_info) in segments {
-        let seg_reader = match reader.get_mut(&seg_no) {
+        let seg_reader = match reader.get_mut(seg_no) {
             Some(reader) => reader,
             None => unreachable!()
         };
@@ -292,15 +292,15 @@ fn read_files<R: Read + Seek>(
 
     // TODO: Handle encrypted files
     for (filenumber, header_segment_no) in &logical_object_footer.file_header_segment_numbers {
-        let header_offset = match logical_object_footer.file_header_offsets.get(&filenumber) {
+        let header_offset = match logical_object_footer.file_header_offsets.get(filenumber) {
             Some(offset) => offset,
             None => {
                 warn!("Offset for file header of file no {filenumber} not present. Malformed Segment?");
                 continue;
             }
         };
-        let (footer_segment_no, footer_offset) = match logical_object_footer.file_footer_segment_numbers.get(&filenumber) {
-            Some(seg_no) => match logical_object_footer.file_footer_offsets.get(&filenumber) {
+        let (footer_segment_no, footer_offset) = match logical_object_footer.file_footer_segment_numbers.get(filenumber) {
+            Some(seg_no) => match logical_object_footer.file_footer_offsets.get(filenumber) {
                 Some(offset) => (seg_no, offset),
                 None =>  {
                     warn!("Offset for file footer of file no {filenumber} not present. Malformed Segment?");
@@ -313,7 +313,7 @@ fn read_files<R: Read + Seek>(
             }
         };
 
-        let file_header = match reader.get_mut(&header_segment_no) {
+        let file_header = match reader.get_mut(header_segment_no) {
             Some(reader) => {
                 reader.seek(SeekFrom::Start(*header_offset))?;
                 FileHeader::decode_directly(reader)?
@@ -324,7 +324,7 @@ fn read_files<R: Read + Seek>(
             }
         };
 
-        let file_footer = match reader.get_mut(&footer_segment_no) {
+        let file_footer = match reader.get_mut(footer_segment_no) {
             Some(reader) => {
                 reader.seek(SeekFrom::Start(*footer_offset))?;
                 FileFooter::decode_directly(reader)?

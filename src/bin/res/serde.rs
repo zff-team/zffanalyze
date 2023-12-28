@@ -65,7 +65,7 @@ impl Serialize for ObjectInfo {
         state.serialize_field(SER_FIELD_DESCRIPTION_HEADER, &self.header.description_header)?;
         if let Some(files) = &self.files {
             let converted_map: BTreeMap<String, &FileInfo> = files
-            .into_iter()
+            .iter()
             .map(|(key, value)| (key.to_string(), value))
             .collect();
             state.serialize_field(SER_FIELD_FILE, &converted_map)?;
@@ -177,17 +177,17 @@ fn timestamp_to_datetime_formatted(timestamp: u64) -> String {
 
     match OffsetDateTime::from_unix_timestamp(timestamp as i64) {
         Ok(dt) => match dt.format(&format) {
-            Ok(formatted_dt) => return formatted_dt,
+            Ok(formatted_dt) => formatted_dt,
             Err(e) => {
                 warn!("An error occurred while trying to format given timestamp to date: {timestamp}.");
                 debug!("{e}");
-                return timestamp.to_string();
+                timestamp.to_string()
             }
         },
         Err(e) => {
             warn!("An error occurred while trying to format given timestamp to date: {timestamp}.");
             debug!("{e}");
-            return timestamp.to_string();
+            timestamp.to_string()
         }
     }
 }
