@@ -57,3 +57,14 @@ pub(crate) const SER_FIELD_FILE_TYPE: &str = "file_type";
 pub(crate) const SER_FIELD_FILE_NAME: &str = "file_name";
 pub(crate) const SER_FIELD_PARENT_FILE_NUMBER: &str = "parent_file_number";
 pub(crate) const SER_FIELD_EXTENDED_METADATA: &str = "extended_metadata";
+
+// Description header keys
+pub(crate) const DESCRIPTION_KEY_CASE_NUMBER: &str = "case_number";
+pub(crate) const DESCRIPTION_KEY_EXAMINER_NAME: &str = "examiner_name";
+pub(crate) const DESCRIPTION_KEY_EVIDENCE_NUMBER: &str = "evidence_number";
+pub(crate) const DESCRIPTION_KEY_NOTES: &str = "notes";
+pub(crate) const DESCRIPTION_KEY_TOOL_NAME: &str = "tool_name";
+pub(crate) const DESCRIPTION_KEY_TOOL_VERSION: &str = "tool_version";
+
+pub(crate) const ENCODING_KEY_TOOL_NAME: &str = "tn";
+pub(crate) const ENCODING_KEY_TOOL_VERSION: &str = "tv";

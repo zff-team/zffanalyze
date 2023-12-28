@@ -1,6 +1,12 @@
 // - internal
 use crate::*;
 use crate::res::traits::*;
+use zff::constants::{
+    ENCODING_KEY_CASE_NUMBER,
+    ENCODING_KEY_EXAMINER_NAME,
+    ENCODING_KEY_EVIDENCE_NUMBER,
+    ENCODING_KEY_NOTES,
+};
 
 // - external
 use serde::ser::{Serialize, Serializer, SerializeStruct};
@@ -62,7 +68,19 @@ impl Serialize for ObjectInfo {
         state.serialize_field(SER_FIELD_OBJECT_FLAGS, &self.header.flags)?;
         state.serialize_field(SER_FIELD_ENCRYPTION_HEADER, &self.header.encryption_header)?;
         state.serialize_field(SER_FIELD_COMPRESSION_HEADER, &self.header.compression_header)?;
-        state.serialize_field(SER_FIELD_DESCRIPTION_HEADER, &self.header.description_header)?;
+        let mut description_header_map = BTreeMap::new();
+        for (key, value) in self.header.description_header.identifier_map() {
+            match key.as_str() {
+                ENCODING_KEY_CASE_NUMBER => { description_header_map.insert(DESCRIPTION_KEY_CASE_NUMBER.to_string(), value); },
+                ENCODING_KEY_EXAMINER_NAME => { description_header_map.insert(DESCRIPTION_KEY_EXAMINER_NAME.to_string(), value); },
+                ENCODING_KEY_EVIDENCE_NUMBER => { description_header_map.insert(DESCRIPTION_KEY_EVIDENCE_NUMBER.to_string(), value); },
+                ENCODING_KEY_NOTES => { description_header_map.insert(DESCRIPTION_KEY_NOTES.to_string(), value); },
+                ENCODING_KEY_TOOL_NAME => { description_header_map.insert(DESCRIPTION_KEY_TOOL_NAME.to_string(), value); },
+                ENCODING_KEY_TOOL_VERSION => { description_header_map.insert(DESCRIPTION_KEY_TOOL_VERSION.to_string(), value); },
+                _ => { description_header_map.insert(key.to_string(), value); }
+            }
+        };
+        state.serialize_field(SER_FIELD_DESCRIPTION_HEADER, &description_header_map)?;
         if let Some(files) = &self.files {
             let converted_map: BTreeMap<String, &FileInfo> = files
             .iter()
