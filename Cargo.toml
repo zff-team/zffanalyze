@@ -1,13 +1,13 @@
 [package]
 name = "zffanalyze"
 authors = ["ph0llux <ph0llux@pm.me>"]
-version = "2.0.0-alpha.0"
+version = "2.0.0-beta.0"
 edition = "2021"
 rust-version = "1.67.1"
 license = "MIT OR Apache-2.0"
 description = "A command line utility to analyze zff files."
-homepage = "https://github.com/ph0llux/zffanalyze"
-repository = "https://github.com/ph0llux/zffanalyze"
+homepage = "https://zff.dev"
+repository = "https://github.com/zff-team/zffanalyze"
 keywords = ["forensics", "security", "file-format", "file"]
 categories = ["command-line-utilities"]
 publish = true
@@ -21,12 +21,12 @@ bench = true
 [dependencies]
 clap = { version = "4.2.7", features = [ "derive" ] }
 zff = { path="../zff", features = ["serde"] }
-base64 = "0.13.0"
+base64 = "0.21"
 hex = "0.4.3"
 time = { version = "0.3.4", features = [ "formatting" ] }
-toml = "0.5.8"
+toml = "0.8.8"
 serde_json = "1.0"
 serde = { version = "1.0", features = ["derive"] }
 #logging
 log = "0.4.6"
-env_logger = "0.9.0"
+env_logger = "0.10"
