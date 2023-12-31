@@ -1,4 +1,10 @@
 # zffanalyze
+[![crate][crate-image]][crate-link]
+![GPL3.0-License][license-image]
+![Rust Version][rustc-image]
+[![website][website-image]][website-link]
+[![zffanalyze](https://snapcraft.io/zffanalyze/badge.svg)](https://snapcraft.io/zffanalyze)
+[![zffanalyze](https://snapcraft.io/zffanalyze/trending.svg?name=0)](https://snapcraft.io/zffanalyze)
 
 ```zffanalyze``` is a command line utility to analyze zff images.
 
@@ -54,3 +60,20 @@ If you want to determine the authenticity of the data with an existing public ke
 ```bash
 zffanalyze -i <YOUR_ZFF_IMAGE.z01> -k "c9IvuVj4lnGVSXR5Azx8SAyqQBpeHMKpB/4v8/Cj4Ew="
 ```
+
+### License
+
+```zffanalyze``` is open source and GPLv3 licensed.
+
+### Contribution
+
+Unless you explicitly state otherwise, any contribution intentionally submitted for inclusion in the work by you, shall be licensed as above, without any additional terms or conditions.
+
+[//]: # (badges)
+
+[crate-image]: https://buildstats.info/crate/zffanalyze
+[crate-link]: https://crates.io/crates/zffanalyze
+[license-image]: https://img.shields.io/crates/l/zffanalyze
+[rustc-image]: https://img.shields.io/badge/rustc-1.70.0+-blue.svg
+[website-image]: https://img.shields.io/website-up-down-green-red/http/zff.dev.svg
+[website-link]: https://zff.dev
