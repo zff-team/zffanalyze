@@ -174,7 +174,9 @@ impl Serialize for SegmentInfo {
     {
         debug!("Serialize segment {}", &self.header.segment_number);
         let mut state = serializer.serialize_struct(SER_STRUCT_SEGMENT_INFO, 6)?;
-        state.serialize_field(SER_FIELD_UNIQUE_IDENTIFIER, &self.header.unique_identifier)?;
+        // the hex representation of the unique identifier is used to avoid problems with the
+        // serialization of big u64 values (as toml only allows signed integer values).
+        state.serialize_field(SER_FIELD_UNIQUE_IDENTIFIER, &hex::encode(self.header.unique_identifier.to_le_bytes()))?;
         state.serialize_field(SER_FIELD_SEGMENT_NUMBER, &self.header.segment_number)?;
         state.serialize_field(SER_FIELD_CHUNKMAP_SIZE, &format!("{} ({})", 
                     self.header.chunkmap_size.bytes_as_hrb(), self.header.chunkmap_size))?;
