@@ -10,7 +10,7 @@ pub mod traits;
 mod serde;
 
 // - re-exports
-pub(crate) use serde::*;
+pub(crate) use self::serde::*;
 
 // - internal
 use crate::constants::*;
