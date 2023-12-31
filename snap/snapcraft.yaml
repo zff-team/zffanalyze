@@ -3,32 +3,38 @@ adopt-info: zffanalyze
 summary: Tool to analyze and verify zff files.
 description: |
   zffanalyze is used analyze and verify zff files.
-
-  Zff (Z forensic file format) is a completley new designed file format
-  to store and handle the contents and structure of a partial or entire disk image,
-  physical memory or logical file/folder structures. The focus of zff is on speed,
-  security and modularity in concert with forensic requirements. The modular design
-  promises high maintainability and scalability. Zff is an alternative to the ewf
-  and aff file formats and is not compatible with them.
-base: core20
+base: core22
+grade: stable
 confinement: strict
+compression: lzo
+
+architectures:
+  - build-on: amd64
+  - build-on: arm64
+
 parts:
+  # install rust manually
+  rust-deps:
+    plugin: nil
+    build-packages:
+      - curl
+    override-pull: |
+      curl --proto '=https' --tlsv1.2 -sSf https://sh.rustup.rs | sh -s -- -y
   zffanalyze:
-    build-packages: [ gcc ]
+    after: [ rust-deps ]
+    build-packages: [ gcc, libacl1-dev ]
     plugin: rust
-    source: https://github.com/ph0llux/zffanalyze.git
+    source: .
     override-pull: |
       snapcraftctl pull
       VERSION="$(git describe --tags --abbrev=0)"
       [ -n "$(echo $VERSION)" ] && GRADE=stable
       snapcraftctl set-version "$VERSION"
       snapcraftctl set-grade "$GRADE"
-      patch -d $SNAPCRAFT_PART_SRC/src/bin/lib < $SNAPCRAFT_PROJECT_DIR/snap/local/constants_snap_hostfs_prefix.patch
+      patch -d $SNAPCRAFT_PART_SRC/src/bin/res < $SNAPCRAFT_PROJECT_DIR/snap/local/constants_snap_hostfs_prefix.patch
 apps:
   zffanalyze:
     command: bin/zffanalyze
     plugs:
       - home
       - system-backup
-architectures:
-  - build-on: [amd64,arm64]
