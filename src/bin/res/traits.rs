@@ -17,3 +17,23 @@ impl HumanReadable for u64 {
 		humanreadable_size
 	}
 }
+
+pub trait GetElementByKey {
+	type K;
+	type V;
+	fn get(&self, key: Self::K) -> Option<&Self::V>;
+}
+
+impl<K: std::cmp::PartialEq, V> GetElementByKey for Vec<(K, V)> {
+	type K = K;
+	type V = V;
+
+	fn get(&self, key: K) -> Option<&V> {
+		for (element_key, element_value) in self.iter() {
+			if element_key == &key {
+				return  Some(element_value);
+			};
+		}
+		None
+	}
+}

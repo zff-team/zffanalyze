@@ -20,6 +20,7 @@ pub(crate) const UNIX_BASE: &str = "/";
 // Serialized struct names
 pub(crate) const SER_STRUCT_CONTAINER_INFO: &str = "container_info";
 pub(crate) const SER_STRUCT_OBJECT_INFO: &str = "object_info";
+pub(crate) const SER_FIELD_ENCRYPTED_OBJECT_INFOS: &str = "encrypted_object";
 pub(crate) const SER_STRUCT_SEGMENT_INFO: &str = "segment_info";
 pub(crate) const SER_STRUCT_FILE_INFO: &str = "file_info";
 

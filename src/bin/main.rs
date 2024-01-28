@@ -11,8 +11,10 @@ mod res;
 // - internal
 use res::*;
 use res::constants::*;
+use res::traits::*;
 
 
+use zff::ZffErrorKind;
 use zff::{
     Result,
     header::{SegmentHeader, ObjectHeader, EncryptedObjectHeader, FileHeader, ChunkMap},
@@ -30,7 +32,7 @@ use serde::Serialize;
 struct Cli {
 
     /// The input files. This should be your zff image files. You can use this Option multiple times.
-    #[clap(short='i', long="inputfiles")]
+    #[clap(short='i', long="inputfiles", required=true)]
     inputfiles: Vec<String>,
 
     /// The output format.
@@ -199,7 +201,7 @@ fn read_segments(inputfiles: &Vec<PathBuf>, args: &Cli) -> Result<ContainerInfo>
         segments.insert(seg_no, seg_info);
     }
 
-    let mut objects = read_objects(&mut segments, &mut reader)?;
+    let (mut objects, encrypted_objects) = read_objects(args, &mut segments, &mut reader)?;
 
     // add file_info to object info, if verbose mode is set at least two times.
     if args.verbose >= 2 {
@@ -216,17 +218,23 @@ fn read_segments(inputfiles: &Vec<PathBuf>, args: &Cli) -> Result<ContainerInfo>
         main_footer,
         segments,
         objects,
+        encrypted_objects,
     })
 }
 
 fn read_objects<R: Read + Seek>(
+    args: &Cli,
     segments: &mut BTreeMap<u64, SegmentInfo>,
     reader: &mut BTreeMap<u64, R>
-    ) -> Result<BTreeMap<u64, ObjectInfo>> {
+    ) -> Result<(BTreeMap<u64, ObjectInfo>, BTreeMap<u64, EncryptedObjectInfo>)> {
 
     let mut object_header_map = BTreeMap::new();
     let mut object_footer_map = BTreeMap::new();
     let mut objects = BTreeMap::new();
+
+    let mut encrypted_object_header = BTreeMap::new();
+    let mut encrypted_object_footer = BTreeMap::new();
+    let mut encrypted_objects = BTreeMap::new();
 
     for (seg_no, seg_info) in segments {
         let seg_reader = match reader.get_mut(seg_no) {
@@ -234,18 +242,89 @@ fn read_objects<R: Read + Seek>(
             None => unreachable!()
         };
 
-        // TODO: Handle encrypted objects
         for (object_no, object_header_offset) in &seg_info.footer.object_header_offsets {
             seg_reader.seek(SeekFrom::Start(*object_header_offset))?;
-            let obj_header = ObjectHeader::decode_directly(seg_reader)?;
-            object_header_map.insert(object_no, obj_header);
+            match ObjectHeader::decode_directly(seg_reader) {
+                Ok(obj_header) => {  object_header_map.insert(object_no, obj_header); },
+                Err(e) => match e.get_kind() {
+                    ZffErrorKind::MissingPassword => {
+                        seg_reader.seek(SeekFrom::Start(*object_header_offset))?;
+                        let mut enc_obj_header = match EncryptedObjectHeader::decode_directly(seg_reader) {
+                            Ok(obj_header) => obj_header,
+                            Err(e) => {
+                                error!("Could not read object header of object {object_no} from segment {seg_no}.");
+                                debug!("An error occurred while trying to read the object header of object {object_no} from segment {seg_no}: {e}");
+                                exit(EXIT_STATUS_ERROR);
+                            }
+                        };
+                        if let Some(decryption_password) = args.decryption_passwords.get(object_no.to_string()) {
+                            match enc_obj_header.decrypt_with_password(decryption_password) {
+                                Ok(header) => { object_header_map.insert(object_no, header); },
+                                _ => { encrypted_object_header.insert(*object_no, enc_obj_header); },
+                            };
+                        } else {
+                            encrypted_object_header.insert(*object_no, enc_obj_header);
+                        }
+                    },
+                    _ => {
+                        error!("Could not read object header of object {object_no} from segment {seg_no}.");
+                        debug!("An error occurred while trying to read the object header of object {object_no} from segment {seg_no}: {e}");
+                        exit(EXIT_STATUS_ERROR);
+                    },
+                }
+            };
         }
 
         for (object_no, object_footer_offset) in &seg_info.footer.object_footer_offsets {
             seg_reader.seek(SeekFrom::Start(*object_footer_offset))?;
-            let obj_footer = ObjectFooter::decode_directly(seg_reader)?;
-            object_footer_map.insert(object_no, obj_footer);
+            match ObjectFooter::decode_directly(seg_reader) {
+                Ok(obj_footer) => { object_footer_map.insert(object_no, obj_footer); },
+                Err(e) => match e.get_kind() {
+                    ZffErrorKind::MissingPassword => {
+                        seg_reader.seek(SeekFrom::Start(*object_footer_offset))?;
+                        let enc_obj_footer = match EncryptedObjectFooter::decode_directly(seg_reader) {
+                            Ok(obj_footer) => obj_footer,
+                            Err(e) => {
+                                error!("Could not read object footer of object {object_no} from segment {seg_no}.");
+                                debug!("An error occurred while trying to read the object footer of object {object_no} from segment {seg_no}: {e}");
+                                exit(EXIT_STATUS_ERROR);
+                            }
+                        };
+                        if let Some(decrypted_header) = object_header_map.get(object_no) {
+                            // unwrap should safe here, because we checked if a decrypted object header is present.
+                            let decryption_key = decrypted_header.encryption_header.as_ref().unwrap().get_encryption_key_ref().unwrap();
+                            let encryption_algorithm = &decrypted_header.encryption_header.as_ref().unwrap().algorithm;
+                            match enc_obj_footer.decrypt(decryption_key, encryption_algorithm) {
+                                Ok(footer) => { object_footer_map.insert(object_no, footer); },
+                                _ => { encrypted_object_footer.insert(*object_no, enc_obj_footer); },
+                            };
+                        } else {
+                            encrypted_object_footer.insert(*object_no, enc_obj_footer);
+                        }
+                    },
+                    _ => {
+                        error!("Could not read object footer of object {object_no} from segment {seg_no}.");
+                        debug!("An error occurred while trying to read the object footer of object {object_no} from segment {seg_no}: {e}");
+                        exit(EXIT_STATUS_ERROR);
+                    },
+                }
+            };
         }
+    }
+
+    for (object_no, enc_obj_header) in encrypted_object_header {
+        let enc_obj_footer = match encrypted_object_footer.remove(&object_no) {
+            Some(footer) => footer,
+            None => {
+                error!("No (encrypted) object footer present for object {object_no}");
+                exit(EXIT_STATUS_ERROR); 
+            }
+        };
+        let enc_obj_info = EncryptedObjectInfo {
+            header: enc_obj_header,
+            footer: enc_obj_footer,
+        };
+        encrypted_objects.insert(object_no, enc_obj_info);
     }
 
     for (object_no, obj_header) in &object_header_map {
@@ -275,7 +354,7 @@ fn read_objects<R: Read + Seek>(
         };
     }
 
-    Ok(objects)
+    Ok((objects, encrypted_objects))
 }
 
 fn read_files<R: Read + Seek>(
@@ -346,4 +425,9 @@ fn read_files<R: Read + Seek>(
     object.files = Some(files);
 
     Ok(())
+}
+
+// function to check the integrity of each chunk by comparing the appropriate crc32 hash values.
+fn integrity_check() {
+    unimplemented!();
 }

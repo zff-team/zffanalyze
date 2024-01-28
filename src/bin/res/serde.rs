@@ -1,11 +1,19 @@
+// - STD
+use std::collections::BTreeMap;
+
 // - internal
 use crate::*;
 use crate::res::traits::*;
+use zff::header::MetadataExtendedValue;
 use zff::constants::{
     ENCODING_KEY_CASE_NUMBER,
     ENCODING_KEY_EXAMINER_NAME,
     ENCODING_KEY_EVIDENCE_NUMBER,
     ENCODING_KEY_NOTES,
+    METADATA_ATIME,
+    METADATA_BTIME,
+    METADATA_CTIME,
+    METADATA_MTIME,
 };
 
 // - external
@@ -109,8 +117,8 @@ impl Serialize for FileInfo {
         state.serialize_field(SER_FIELD_FILE_NUMBER, &self.header.file_number)?;
         state.serialize_field(SER_FIELD_FILE_NAME, &self.header.filename)?;
         state.serialize_field(SER_FIELD_PARENT_FILE_NUMBER, &self.header.parent_file_number)?;
-        state.serialize_field(SER_FIELD_ACQUISITION_START, &self.footer.acquisition_start)?;
-        state.serialize_field(SER_FIELD_ACQUISITION_END, &self.footer.acquisition_end)?;
+        state.serialize_field(SER_FIELD_ACQUISITION_START, &timestamp_to_datetime_formatted(self.footer.acquisition_start))?;
+        state.serialize_field(SER_FIELD_ACQUISITION_END, &timestamp_to_datetime_formatted(self.footer.acquisition_end))?;
         state.serialize_field(SER_FIELD_FIRST_CHUNK_NUMBER, &self.footer.first_chunk_number)?;
         state.serialize_field(SER_FIELD_NUMBER_OF_CHUNKS, &self.footer.number_of_chunks)?;
         state.serialize_field(SER_FIELD_SIZE_OF_DATA, &format!("{} ({})", 
@@ -118,9 +126,13 @@ impl Serialize for FileInfo {
         // ensure that all table containing elements are at the end of this serialization, see 
         // https://github.com/toml-rs/toml-rs/issues/142 for further information.
         state.serialize_field(SER_FIELD_FILE_TYPE, &self.header.file_type)?;
-        state.serialize_field(SER_FIELD_EXTENDED_METADATA, &self.header.metadata_ext)?;
         state.serialize_field(SER_FIELD_HASH_HEADER, &self.footer.hash_header)?;
-
+        //state.serialize_field(SER_FIELD_EXTENDED_METADATA, &self.header.metadata_ext)?;
+        let mut metadata_ext = BTreeMap::new();
+        for (key, value) in &self.header.metadata_ext {
+            metadata_ext.insert(key.to_string(), get_extended_metadata_values_to_human_readable(key, value.clone()));
+        }; 
+        state.serialize_field(SER_FIELD_EXTENDED_METADATA, &metadata_ext)?;
         
         state.end()
     }
@@ -131,6 +143,7 @@ pub(crate) struct ContainerInfo {
     pub main_footer: Option<MainFooter>,
     pub segments: BTreeMap<u64, SegmentInfo>,
     pub objects: BTreeMap<u64, ObjectInfo>,
+    pub encrypted_objects: BTreeMap<u64, EncryptedObjectInfo>,
 }
 
 impl Serialize for ContainerInfo {
@@ -155,7 +168,17 @@ impl Serialize for ContainerInfo {
         for (key, value) in &self.objects {
             objects.insert(key.to_string(), value);
         };
-        state.serialize_field(SER_FIELD_OBJECT_INFOS, &objects)?;
+        if !objects.is_empty() {
+            state.serialize_field(SER_FIELD_OBJECT_INFOS, &objects)?;
+        }
+        // encrypted objects
+        let mut encrypted_objects = BTreeMap::new();
+        for (key, value) in &self.encrypted_objects {
+            encrypted_objects.insert(key.to_string(), value);
+        };
+        if !encrypted_objects.is_empty() {
+            state.serialize_field(SER_FIELD_ENCRYPTED_OBJECT_INFOS, &encrypted_objects)?;
+        }
         state.end()
     }
 }
@@ -209,5 +232,19 @@ fn timestamp_to_datetime_formatted(timestamp: u64) -> String {
             debug!("{e}");
             timestamp.to_string()
         }
+    }
+}
+
+fn get_extended_metadata_values_to_human_readable(key: &String, value: MetadataExtendedValue) -> MetadataExtendedValue {
+
+    if key == METADATA_ATIME || key == METADATA_BTIME || key == METADATA_CTIME || key == METADATA_MTIME {
+
+        if let Some(inner_value) = value.clone().into_any().downcast_ref::<u64>() {
+            MetadataExtendedValue::String(timestamp_to_datetime_formatted(*inner_value))
+        } else {
+            value
+        }
+    } else {
+        value
     }
 }
