@@ -130,7 +130,7 @@ impl Serialize for FileInfo {
         //state.serialize_field(SER_FIELD_EXTENDED_METADATA, &self.header.metadata_ext)?;
         let mut metadata_ext = BTreeMap::new();
         for (key, value) in &self.header.metadata_ext {
-            metadata_ext.insert(key.to_string(), get_extended_metadata_values_to_human_readable(key, value.clone()));
+            metadata_ext.insert(key.to_string(), get_extended_metadata_values_to_human_readable(key, value));
         }; 
         state.serialize_field(SER_FIELD_EXTENDED_METADATA, &metadata_ext)?;
         
@@ -235,16 +235,16 @@ fn timestamp_to_datetime_formatted(timestamp: u64) -> String {
     }
 }
 
-fn get_extended_metadata_values_to_human_readable(key: &String, value: MetadataExtendedValue) -> MetadataExtendedValue {
+fn get_extended_metadata_values_to_human_readable(key: &String, value: &MetadataExtendedValue) -> MetadataExtendedValue {
 
     if key == METADATA_ATIME || key == METADATA_BTIME || key == METADATA_CTIME || key == METADATA_MTIME {
 
-        if let Some(inner_value) = value.clone().into_any().downcast_ref::<u64>() {
+        if let Some(inner_value) = value.as_any().downcast_ref::<u64>() {
             MetadataExtendedValue::String(timestamp_to_datetime_formatted(*inner_value))
         } else {
-            value
+            value.clone()
         }
     } else {
-        value
+        value.clone()
     }
 }
