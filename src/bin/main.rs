@@ -66,14 +66,15 @@ struct Cli {
     log_level: LogLevel,
 }
 
-#[derive(ValueEnum, Clone, Debug)]
+#[derive(ValueEnum, Clone, PartialEq)]
 enum LogLevel {
     Error,
     Warn,
     Info,
+    FullInfo,
     Debug,
-    Trace,
-    Off
+    FullDebug,
+    Trace
 }
 
 #[derive(ValueEnum, Clone)]
@@ -88,18 +89,24 @@ fn main() {
     
     // setup logging
     let log_level = match args.log_level {
-        LogLevel::Error => Some(LevelFilter::Error),
-        LogLevel::Warn => Some(LevelFilter::Warn),
-        LogLevel::Info => Some(LevelFilter::Info),
-        LogLevel::Debug => Some(LevelFilter::Debug),
-        LogLevel::Trace => Some(LevelFilter::Trace),
-        LogLevel::Off => None,
+        LogLevel::Error => LevelFilter::Error,
+        LogLevel::Warn => LevelFilter::Warn,
+        LogLevel::Info => LevelFilter::Info,
+        LogLevel::FullInfo => LevelFilter::Info,
+        LogLevel::Debug => LevelFilter::Debug,
+        LogLevel::FullDebug => LevelFilter::Debug,
+        LogLevel::Trace => LevelFilter::Trace,
     };
-    if let Some(log_level) = log_level {
-       env_logger::builder()
-            .format_timestamp_nanos()
-            .filter_level(log_level)
-            .init(); 
+    if args.log_level == LogLevel::FullInfo || args.log_level == LogLevel::FullDebug {
+        env_logger::builder()
+        .format_timestamp_nanos()
+        .filter_level(log_level)
+        .init();
+    } else {
+        env_logger::builder()
+        .format_timestamp_nanos()
+        .filter_module(env!("CARGO_PKG_NAME"), log_level)
+        .init();
     };
 
     let inputfiles: Vec<PathBuf> = args.inputfiles.iter().map(|x| concat_prefix_path(INPUTFILES_PATH_PREFIX ,x)).collect();
@@ -228,6 +235,8 @@ fn read_objects<R: Read + Seek>(
     reader: &mut BTreeMap<u64, R>
     ) -> Result<(BTreeMap<u64, ObjectInfo>, BTreeMap<u64, EncryptedObjectInfo>)> {
 
+    debug!("Reading objects from segments.");
+
     let mut object_header_map = BTreeMap::new();
     let mut object_footer_map = BTreeMap::new();
     let mut objects = BTreeMap::new();
@@ -248,6 +257,8 @@ fn read_objects<R: Read + Seek>(
                 Ok(obj_header) => {  object_header_map.insert(object_no, obj_header); },
                 Err(e) => match e.get_kind() {
                     ZffErrorKind::MissingPassword => {
+                        debug!("Object header of object {object_no} is encrypted.");
+
                         seg_reader.seek(SeekFrom::Start(*object_header_offset))?;
                         let mut enc_obj_header = match EncryptedObjectHeader::decode_directly(seg_reader) {
                             Ok(obj_header) => obj_header,
