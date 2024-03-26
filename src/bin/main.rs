@@ -28,6 +28,7 @@ use zff::{
 use clap::{Parser, ValueEnum};
 use log::{LevelFilter, error, warn, debug, info};
 use serde::Serialize;
+use dialoguer::{theme::ColorfulTheme, Password as PasswordDialog};
 
 #[derive(Parser)]
 #[clap(about, version, author)]
@@ -48,17 +49,20 @@ struct Cli {
     #[arg(short='v', long="verbose", action = clap::ArgAction::Count)]
     verbose: u8,
 
-    //TODO
     /// The password(s), if the file(s) are encrypted. You can use this option multiple times to enter different passwords for different objects.
+    /// If you don't provide a password for an object, you will be asked to enter the password interactively.
     #[clap(short='p', long="decryption-passwords", value_parser = parse_key_val::<String, String>)]
     decryption_passwords: Vec<(String, String)>,
+
+    /// Do not ask interactively for passwords, if objects are encrypted.
+    #[clap(short='I', long="ignore-encryption")]
+    ignore_encryption: bool,
 
     //TODO
     /// The public sign key to verify the appropriate signatures.
     #[clap(short='k', long="pub-key")]
     public_key: Option<String>,
 
-    //TODO
     /// Checks the integrity of the imaged data by calculating/comparing the used hash values.
     #[clap(short='c', long="integrity-check")]
     check_integrity: bool,
@@ -278,7 +282,7 @@ fn read_objects<R: Read + Seek>(
                                 exit(EXIT_STATUS_ERROR);
                             }
                         };
-                        if let Some(decryption_password) = args.decryption_passwords.get(object_no.to_string()) {
+                        if let Some(decryption_password) = try_get_password(args, *object_no) {
                             match enc_obj_header.decrypt_with_password(decryption_password) {
                                 Ok(header) => { object_header_map.insert(object_no, header); },
                                 _ => { encrypted_object_header.insert(*object_no, enc_obj_header); },
@@ -391,7 +395,6 @@ fn read_files<R: Read + Seek>(
         _ => return Ok(())
     };
 
-    // TODO: Handle encrypted files
     for (filenumber, header_segment_no) in &logical_object_footer.file_header_segment_numbers {
         let header_offset = match logical_object_footer.file_header_offsets.get(filenumber) {
             Some(offset) => offset,
@@ -617,4 +620,26 @@ fn get_chunk<R: Read + Seek>(
             exit(EXIT_STATUS_ERROR);
         }
     }
+}
+
+fn try_get_password(args: &Cli, object_no: u64) -> Option<String> {
+    match args.decryption_passwords.get(object_no.to_string()) {
+        Some(pw) => Some(pw.clone()),
+        None => {
+            if args.ignore_encryption {
+                None
+            } else {
+                enter_password_dialog(object_no)
+            }
+        },
+    }
+}
+
+fn enter_password_dialog(obj_no: u64) -> Option<String> {
+    match PasswordDialog::with_theme(&ColorfulTheme::default())
+        .with_prompt(format!("Enter the password for object {obj_no}"))
+        .interact() {
+            Ok(pw) => Some(pw),
+            Err(_) => None
+        }
 }
