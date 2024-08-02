@@ -19,9 +19,10 @@ use zff::{
     Result,
     helper::get_segment_of_chunk_no,
     Chunk,
-    header::{SegmentHeader, ObjectHeader, EncryptedObjectHeader, FileHeader, ChunkMap, EncryptionInformation},
+    header::{SegmentHeader, ObjectHeader, EncryptedObjectHeader, FileHeader, ChunkMap, EncryptionInformation, HashHeader},
     footer::{SegmentFooter, MainFooter, ObjectFooter, EncryptedObjectFooter, FileFooter},
     HeaderCoding,
+    Signature,
 };
 
 // - external
@@ -216,8 +217,8 @@ fn read_segments(inputfiles: &Vec<PathBuf>, args: &Cli) -> Result<ContainerInfo>
 
     let (mut objects, encrypted_objects) = read_objects(args, &mut segments, &mut reader)?;
 
-    // add file_info to object info, if verbose mode is set at least two times.
-    if args.verbose >= 2 || args.check_integrity {
+    // add file_info to object info, if verbose mode is set at least two times or the integrity check or signature verification should be performed.
+    if args.verbose >= 2 || args.check_integrity || args.public_key.is_some() {
         for object_info in objects.values_mut() {
             let encryption_information = EncryptionInformation::try_from(&object_info.header).ok();
             read_files(object_info, &mut reader, encryption_information)?;
@@ -235,8 +236,20 @@ fn read_segments(inputfiles: &Vec<PathBuf>, args: &Cli) -> Result<ContainerInfo>
         encrypted_objects,
     };
 
+    let mut check_mode = false;
+
     if args.check_integrity {
-        integrity_check(container_info, &mut reader);
+        integrity_check(&container_info, &mut reader);
+        check_mode = true;
+    }
+
+    if args.public_key.is_some() {
+        let public_key = args.public_key.as_ref().unwrap();
+        verify_signature(&container_info, public_key);
+        check_mode = true;
+    }
+
+    if check_mode {
         exit(EXIT_STATUS_SUCCESS);
     }
 
@@ -464,11 +477,60 @@ fn read_files<R: Read + Seek>(
     Ok(())
 }
 
+// function to verify the signature of each hash (if an signature is present) by using the appropriate public key.
+fn verify_signature(container_info: &ContainerInfo, public_key: &str) {
+    for object_info in container_info.objects.values() {
+        match object_info.footer {
+            ObjectFooter::Physical(ref footer) => {
+                info!("Verifying signature of object {}.", object_info.header.object_number);
+                check_hash_header(&footer.hash_header, public_key);
+            },
+            ObjectFooter::Logical(_) => {
+                info!("Verifying signature of object {}.", object_info.header.object_number);
+                let files = match &object_info.files {
+                    Some(files) => files,
+                    None => unreachable!()
+                };
+                for file_info in files.values() {
+                    check_hash_header(&file_info.footer.hash_header, public_key);
+                }
+            },
+            ObjectFooter::Virtual(_) => {
+                debug!("Virtual objects are not supported for signature verification.");
+                continue;
+            },
+        }
+    }
+}
+
+fn check_hash_header(hash_header: &HashHeader, public_key: &str) {
+    for hash_value in &hash_header.hashes {
+        let hash = hash_value.hash();
+        let hash_type = hash_value.hash_type();
+        let signature = match hash_value.ed25519_signature() {
+            Some(signature) => signature,
+            None => {
+                warn!("No signature found for {hash_type} hash.");
+                continue;
+            }
+        };
+        match Signature::verify_with_base64_key(public_key, hash, signature) {
+            Ok(true) => info!("Signature of {hash_type} hash is valid."),
+            Ok(false) => warn!("Signature of {hash_type} hash is invalid."),
+            Err(e) => {
+                error!("An error occurred while trying to verify the signature of {hash_type} hash.");
+                debug!("{e}");
+                exit(EXIT_STATUS_ERROR);
+            }
+        }
+    }
+}
+
 // function to check the integrity of each chunk by comparing the appropriate crc32 hash values.
-fn integrity_check<R: Read + Seek>(container_info: ContainerInfo, reader: &mut BTreeMap<u64, R>) {
+fn integrity_check<R: Read + Seek>(container_info: &ContainerInfo, reader: &mut BTreeMap<u64, R>) {
     let mut integrity_check = true;
     // setup a BTreeSet with all chunk numbers in the container.
-    let mut all_chunk_numbers = get_all_chunk_numbers(&container_info);
+    let mut all_chunk_numbers = get_all_chunk_numbers(container_info);
 
     // interate over all objects and check the integrity of the chunks.
     // remove the chunk number from the BTreeSet, if the chunk is present.
