@@ -3,34 +3,36 @@ adopt-info: zffanalyze
 summary: Tool to analyze and verify zff files.
 description: |
   zffanalyze is used analyze and verify zff files.
-base: core22
+base: core24
 grade: stable
 confinement: strict
 compression: lzo
 
-architectures:
-  - build-on: amd64
-  - build-on: arm64
+platforms:
+  amd64:
+    build-on: [amd64]
+    build-for: [amd64]
+  arm64:
+    build-on: [arm64]
+    build-for: [arm64]
 
 parts:
-  # install rust manually
-  rust-deps:
-    plugin: nil
-    build-packages:
-      - curl
-    override-pull: |
-      curl --proto '=https' --tlsv1.2 -sSf https://sh.rustup.rs | sh -s -- -y
   zffanalyze:
-    after: [ rust-deps ]
     build-packages: [ gcc, libacl1-dev ]
     plugin: rust
+    rust-channel: "1.80.0"
     source: .
     override-pull: |
-      snapcraftctl pull
-      VERSION="$(git describe --tags --abbrev=0)"
-      [ -n "$(echo $VERSION)" ] && GRADE=stable
-      snapcraftctl set-version "$VERSION"
-      snapcraftctl set-grade "$GRADE"
+      craftctl default
+      VERSION=$(grep -m1 '^version = ' Cargo.toml | sed -e 's/version = "\(.*\)"/\1/')
+      [ -n "$(echo $VERSION)" ]
+      if echo $VERSION | grep -q -E 'alpha|beta|rc'; then
+        GRADE=devel
+      else
+        GRADE=stable
+      fi
+      craftctl set version="$VERSION"
+      craftctl set grade="$GRADE"
       patch -d $SNAPCRAFT_PART_SRC/src/bin/res < $SNAPCRAFT_PROJECT_DIR/snap/local/constants_snap_hostfs_prefix.patch
 apps:
   zffanalyze:
