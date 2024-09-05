@@ -115,26 +115,26 @@ jobs:
     runs-on: ubuntu-20.04
     steps:
     - name: Download binaries
-      uses: actions/download-artifact@v2
+      uses: actions/download-artifact@v4
       with:
         name: ${{ env.PROJECT_NAME }}-x86_64-linux
         path: ./release
     - name: Download Linux aarch64 binaries
-      uses: actions/download-artifact@v2
+      uses: actions/download-artifact@v4
       with:
         name: ${{ env.PROJECT_NAME }}-aarch64-linux
     - name: Download Windows binaries
-      uses: actions/download-artifact@v2
+      uses: actions/download-artifact@v4
       with:
         name: ${{ env.PROJECT_NAME }}-x86_64-windows.exe
         path: ./release
     - name: Download macOS binaries
-      uses: actions/download-artifact@v2
+      uses: actions/download-artifact@v4
       with:
         name: ${{ env.PROJECT_NAME }}-aarch64-macos
         path: ./release
     - name: Download Windows aarch64 binaries
-      uses: actions/download-artifact@v2
+      uses: actions/download-artifact@v4
       with:
         name: ${{ env.PROJECT_NAME }}-aarch64-windows.exe
         path: ./release
