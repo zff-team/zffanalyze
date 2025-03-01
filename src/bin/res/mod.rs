@@ -92,10 +92,10 @@ pub(crate) fn try_find_footer<R: Read + Seek>(reader: &mut R) -> Result<Footer> 
             Ok(Footer::MainAndSegment((main_footer, segment_footer)))
         } else {
             reader.seek(SeekFrom::Start(position))?;
-            Err(ZffError::new(ZffErrorKind::MalformedSegment, ""))
+            Err(ZffError::new(ZffErrorKind::Invalid, ""))
         }
     } else {
         reader.seek(SeekFrom::Start(position))?;
-        Err(ZffError::new(ZffErrorKind::MalformedSegment, ""))
+        Err(ZffError::new(ZffErrorKind::Invalid, ""))
     }
 }

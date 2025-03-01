@@ -14,12 +14,12 @@ use res::constants::*;
 use res::traits::*;
 
 
-use zff::{EncryptedChunk, ZffErrorKind};
+use zff::header::{ChunkDeduplicationMap, ChunkSamebytesMap, ChunkHeaderMap, ChunkMap};
+use zff::ZffErrorKind;
 use zff::{
     Result,
     helper::get_segment_of_chunk_no,
-    Chunk,
-    header::{SegmentHeader, ObjectHeader, EncryptedObjectHeader, FileHeader, ChunkMap, EncryptionInformation, HashHeader},
+    header::{SegmentHeader, ObjectHeader, EncryptedObjectHeader, FileHeader, ChunkMaps, EncryptionInformation, HashHeader},
     footer::{SegmentFooter, MainFooter, ObjectFooter, EncryptedObjectFooter, FileFooter},
     HeaderCoding,
     Signature,
@@ -27,7 +27,7 @@ use zff::{
 
 // - external
 use clap::{Parser, ValueEnum};
-use log::{LevelFilter, error, warn, debug, info};
+use log::{LevelFilter, error, warn, debug, info, trace};
 use serde::Serialize;
 use dialoguer::{theme::ColorfulTheme, Password as PasswordDialog};
 
@@ -36,7 +36,7 @@ use dialoguer::{theme::ColorfulTheme, Password as PasswordDialog};
 struct Cli {
 
     /// The input files. This should be your zff image files. You can use this Option multiple times.
-    #[clap(short='i', long="inputfiles", required=true)]
+    #[clap(short='i', long="inputfiles", required=true, value_delimiter = ' ', num_args = 1..)]
     inputfiles: Vec<String>,
 
     /// The output format.
@@ -78,9 +78,7 @@ enum LogLevel {
     Error,
     Warn,
     Info,
-    FullInfo,
     Debug,
-    FullDebug,
     Trace
 }
 
@@ -99,27 +97,18 @@ fn main() {
         LogLevel::Error => LevelFilter::Error,
         LogLevel::Warn => LevelFilter::Warn,
         LogLevel::Info => LevelFilter::Info,
-        LogLevel::FullInfo => LevelFilter::Info,
         LogLevel::Debug => LevelFilter::Debug,
-        LogLevel::FullDebug => LevelFilter::Debug,
         LogLevel::Trace => LevelFilter::Trace,
     };
-    if args.log_level == LogLevel::FullInfo || args.log_level == LogLevel::FullDebug {
-        env_logger::builder()
+    env_logger::builder()
         .format_timestamp_nanos()
         .filter_level(log_level)
         .init();
-    } else {
-        env_logger::builder()
-        .format_timestamp_nanos()
-        .filter_module(env!("CARGO_PKG_NAME"), log_level)
-        .init();
-    };
 
     let inputfiles: Vec<PathBuf> = args.inputfiles.iter().map(|x| concat_prefix_path(INPUTFILES_PATH_PREFIX ,x)).collect();
     debug!("Concatenated inputfiles to: {:?}", inputfiles);
 
-    let container_info = match read_segments(&inputfiles, &args) {
+    let mut container_info = match read_segments(&inputfiles, &args) {
         Ok(container_info) => container_info,
         Err(e) => {
             error!("An error occurred while trying to read the appropriate zff file(s).");
@@ -127,7 +116,11 @@ fn main() {
             exit(EXIT_STATUS_ERROR);
         }
     };
-
+    if args.verbose < 1 {
+        container_info.segments.iter_mut().for_each(|(_, segment)| {
+            segment.chunkmaps = None;
+        });
+    }
     print_serialized_data(&args, container_info);
 
 
@@ -166,11 +159,6 @@ fn print_serialized_data<D: Serialize + std::fmt::Debug>(args: &Cli, data: D) {
     }
 }
 
-fn get_chunkmap<R: Read + Seek>(reader: &mut R, offset: u64) -> Result<ChunkMap> {
-    reader.seek(SeekFrom::Start(offset))?;
-    ChunkMap::decode_directly(reader)
-}
-
 fn read_segments(inputfiles: &Vec<PathBuf>, args: &Cli) -> Result<ContainerInfo> {
     let mut segments = BTreeMap::new();
     let mut main_footer = None;
@@ -196,19 +184,59 @@ fn read_segments(inputfiles: &Vec<PathBuf>, args: &Cli) -> Result<ContainerInfo>
         };
         let seg_no = segment_header.segment_number;
 
-        // add chunkmaps to segment info, if verbose mode is set at leat one time.
-        let mut chunkmaps = Vec::new();
-        if args.verbose >= 1 || args.check_integrity {
-            for chunkmap_offset in segment_footer.chunk_map_table.values() {
-                let chunkmap = get_chunkmap(&mut file, *chunkmap_offset)?;
-                chunkmaps.push(chunkmap);
-            }
+        // add chunkmaps to segment info
+        let mut chunkmaps = ChunkMaps::default();
+        // chunk header table 
+        let mut header_map = BTreeMap::new();
+        for (_, offset) in &segment_footer.chunk_header_map_table {
+            file.seek(SeekFrom::Start(*offset))?;
+            let mut chunk_header_map = match ChunkHeaderMap::decode_directly(&mut file) {
+                Ok(map) => map,
+                Err(e) => {
+                    error!("Could not read chunk header map from {}.", inputfile.display());
+                    debug!("An error occurred while trying to read the chunk offset map of {}: {e}", inputfile.display());
+                    exit(EXIT_STATUS_ERROR);
+                }
+            };
+            header_map.extend(chunk_header_map.flush());
+        }
+        chunkmaps.header_map = ChunkHeaderMap::with_data(header_map);
+
+        // chunk same bytes table 
+        let mut same_bytes_map = BTreeMap::new();
+        for (_, offset) in &segment_footer.chunk_samebytes_map_table {
+            file.seek(SeekFrom::Start(*offset))?;
+            let mut chunk_same_bytes_map = match ChunkSamebytesMap::decode_directly(&mut file) {
+                Ok(map) => map,
+                Err(e) => {
+                    error!("Could not read chunk same bytes map from {}.", inputfile.display());
+                    debug!("An error occurred while trying to read the chunk same bytes map of {}: {e}", inputfile.display());
+                    exit(EXIT_STATUS_ERROR);
+                }
+            };
+            same_bytes_map.extend(chunk_same_bytes_map.flush());
+        }
+        chunkmaps.same_bytes_map = ChunkSamebytesMap::with_data(same_bytes_map);
+
+        // chunk deduplication table
+        let mut dedup_map = BTreeMap::new();
+        for (_, offset) in &segment_footer.chunk_dedup_map_table {
+            file.seek(SeekFrom::Start(*offset))?;
+            let mut chunk_dedup_map = match ChunkDeduplicationMap::decode_directly(&mut file) {
+                Ok(map) => map,
+                Err(e) => {
+                    error!("Could not read chunk deduplication map from {}.", inputfile.display());
+                    debug!("An error occurred while trying to read the chunk deduplication map of {}: {e}", inputfile.display());
+                    exit(EXIT_STATUS_ERROR);
+                }
+            };
+            dedup_map.extend(chunk_dedup_map.flush());
         }
 
         let seg_info = SegmentInfo {
             header: segment_header,
             footer: segment_footer,
-            chunkmaps,
+            chunkmaps: Some(chunkmaps),
         };
 
         reader.insert(seg_no, file);
@@ -282,8 +310,8 @@ fn read_objects<R: Read + Seek>(
             seg_reader.seek(SeekFrom::Start(*object_header_offset))?;
             match ObjectHeader::decode_directly(seg_reader) {
                 Ok(obj_header) => {  object_header_map.insert(object_no, obj_header); },
-                Err(e) => match e.get_kind() {
-                    ZffErrorKind::MissingPassword => {
+                Err(e) => match e.kind() {
+                    ZffErrorKind::EncryptionError => {
                         debug!("Object header of object {object_no} is encrypted.");
 
                         seg_reader.seek(SeekFrom::Start(*object_header_offset))?;
@@ -317,8 +345,8 @@ fn read_objects<R: Read + Seek>(
             seg_reader.seek(SeekFrom::Start(*object_footer_offset))?;
             match ObjectFooter::decode_directly(seg_reader) {
                 Ok(obj_footer) => { object_footer_map.insert(object_no, obj_footer); },
-                Err(e) => match e.get_kind() {
-                    ZffErrorKind::MissingPassword => {
+                Err(e) => match e.kind() {
+                    ZffErrorKind::EncryptionError => {
                         seg_reader.seek(SeekFrom::Start(*object_footer_offset))?;
                         let enc_obj_footer = match EncryptedObjectFooter::decode_directly(seg_reader) {
                             Ok(obj_footer) => obj_footer,
@@ -526,61 +554,9 @@ fn check_hash_header(hash_header: &HashHeader, public_key: &str) {
     }
 }
 
-// function to check the integrity of each chunk by comparing the appropriate crc32 hash values.
+// function to check the integrity of each chunk by comparing the appropriate xxhash values.
 fn integrity_check<R: Read + Seek>(container_info: &ContainerInfo, reader: &mut BTreeMap<u64, R>) {
-    let mut integrity_check = true;
-    // setup a BTreeSet with all chunk numbers in the container.
-    let mut all_chunk_numbers = get_all_chunk_numbers(container_info);
-
-    // interate over all objects and check the integrity of the chunks.
-    // remove the chunk number from the BTreeSet, if the chunk is present.
-    for object_info in container_info.objects.values() {
-        info!("Checking integrity of object {}.", object_info.header.object_number);
-        let encryption_information = EncryptionInformation::try_from(&object_info.header).ok();
-        match &object_info.footer {
-            ObjectFooter::Physical(footer) => {
-                for chunk_number in footer.first_chunk_number..=(footer.first_chunk_number+footer.number_of_chunks-1) {
-                    let chunk = get_chunk(chunk_number, &mut all_chunk_numbers, reader, &encryption_information);
-                    match chunk.check_integrity(&object_info.header.compression_header.algorithm) {
-                        Ok(true) => debug!("Chunk no {chunk_number} contains valid data."),
-                        _ => {
-                            warn!("Integrity check of chunk no {chunk_number} failed. Data may corrupted.");
-                            integrity_check = false;
-                        }
-                    }
-                }
-            },
-            ObjectFooter::Logical(_) => {
-                if let Some(files) = &object_info.files {
-                    for file_info in files.values() {
-                        for chunk_number in file_info.footer.first_chunk_number..=(file_info.footer.first_chunk_number+file_info.footer.number_of_chunks-1) {
-                            let chunk = get_chunk(chunk_number, &mut all_chunk_numbers, reader, &encryption_information);
-                            match chunk.check_integrity(&object_info.header.compression_header.algorithm) {
-                                Ok(true) => debug!("Chunk no {chunk_number} contains valid data."),
-                                _ => {
-                                    warn!("Integrity check of chunk no {chunk_number} failed. Data may corrupted.");
-                                    integrity_check = false;
-                                },
-                            }
-                        }
-                    }
-                } else {
-                    warn!("No files found in logical object {}.", object_info.header.object_number);
-                    continue;
-                }
-            },
-            ObjectFooter::Virtual(_) => {
-                debug!("Virtual objects are not supported for integrity checks.");
-                continue;
-            },
-        };
-        info!("Integrity check of object {} finished.", object_info.header.object_number);
-        if integrity_check {
-            info!("All chunks are valid.");
-        } else {
-            warn!("Some chunks are corrupted.");
-        }
-    }
+    todo!()
 }
 
 // returns a BTreeMap with all chunk numbers of the container (and the appropriate offset), to see, if a chunk is missing or is available without a corresponding
@@ -595,9 +571,9 @@ fn get_all_chunk_numbers(container_info: &ContainerInfo) -> BTreeMap<u64, (u64, 
         
         },
     };
-    let last_chunk_number = *main_footer.chunk_maps.keys().max().unwrap_or(&0);
+    let last_chunk_number = *main_footer.chunk_header_maps.keys().max().unwrap_or(&0);
     for chunk_no in 1..=last_chunk_number {
-        let segment = match get_segment_of_chunk_no(chunk_no, main_footer.chunk_maps()) {
+        let segment = match get_segment_of_chunk_no(chunk_no, &main_footer.chunk_header_maps) {
             Some(segment_no) => match container_info.segments.get(&segment_no) {
                 Some(segment_info) => segment_info,
                 None => {
@@ -610,14 +586,9 @@ fn get_all_chunk_numbers(container_info: &ContainerInfo) -> BTreeMap<u64, (u64, 
                 exit(EXIT_STATUS_ERROR);
             },
         };
-        let offset = match segment.chunkmaps.iter().find(|x| x.chunkmap().contains_key(&chunk_no)) {
-            Some(chunkmap) => match chunkmap.chunkmap().get(&chunk_no) {
-                Some(offset) => *offset,
-                None => {
-                    error!("Chunk {chunk_no} not found in chunkmaps of segment {}, integrity check not possible.", segment.header.segment_number);
-                    exit(EXIT_STATUS_ERROR);
-                }
-            },
+        // unwrap is safe here while the option is just used to handle the serialisation of the chunkmaps
+        let offset = match segment.chunkmaps.as_ref().unwrap().header_map.chunkmap().get(&chunk_no) {
+            Some(header) => header.offset,
             None => {
                 error!("Chunk {chunk_no} not found in chunkmaps of segment {}, integrity check not possible.", segment.header.segment_number);
                 exit(EXIT_STATUS_ERROR);
@@ -626,62 +597,6 @@ fn get_all_chunk_numbers(container_info: &ContainerInfo) -> BTreeMap<u64, (u64, 
         all_chunk_numbers.insert(chunk_no, (segment.header.segment_number, offset));
     }
     all_chunk_numbers
-}
-
-fn get_chunk<R: Read + Seek>(
-    chunk_number: u64, 
-    all_chunk_numbers: &mut BTreeMap<u64, (u64, u64)>, 
-    reader: &mut BTreeMap<u64, R>, 
-    encryption_information: &Option<EncryptionInformation>) -> Chunk {
-    let (segment_no, chunk_offset) = match all_chunk_numbers.remove(&chunk_number) {
-        Some(data) => data,
-        None => {
-            error!("Chunk {chunk_number} in global chunk map. The appropriate container is broken!");
-            exit(EXIT_STATUS_ERROR);
-        }
-    };
-    match reader.get_mut(&segment_no) {
-        Some(reader) => {
-            if let Err(e) = reader.seek(SeekFrom::Start(chunk_offset)) {
-                error!("Could not seek to chunk {chunk_number} in segment {segment_no}.");
-                debug!("An error occurred while trying to seek to chunk {chunk_number} in segment {segment_no}: {e}");
-                exit(EXIT_STATUS_ERROR);
-            };
-            match encryption_information {
-                Some(enc_info) => {
-                    let encrypted_chunk = match EncryptedChunk::new_from_reader(reader) {
-                        Ok(chunk) => chunk,
-                        Err(e) => {
-                            error!("Could not read chunk {chunk_number} from segment {segment_no}.");
-                            debug!("An error occurred while trying to read chunk {chunk_number} from segment {segment_no}: {e}");
-                            exit(EXIT_STATUS_ERROR);
-                        }
-                    
-                    };
-                    match encrypted_chunk.decrypt_and_consume(enc_info.encryption_key.clone(), enc_info.algorithm.clone()) {
-                        Ok(chunk) => chunk,
-                        Err(e) => {
-                            error!("Could not decrypt chunk {chunk_number} from segment {segment_no}.");
-                            debug!("An error occurred while trying to decrypt chunk {chunk_number} from segment {segment_no}: {e}");
-                            exit(EXIT_STATUS_ERROR);
-                        }
-                    }
-                },
-                None => match Chunk::new_from_reader(reader) {
-                    Ok(chunk) => chunk,
-                    Err(e) => {
-                        error!("Could not read chunk {chunk_number} from segment {segment_no}.");
-                        debug!("An error occurred while trying to read chunk {chunk_number} from segment {segment_no}: {e}");
-                        exit(EXIT_STATUS_ERROR);
-                    }
-                }
-            }
-        },
-        None =>  {
-            error!("Segment {segment_no} not found in given segments, integrity check not possible.");
-            exit(EXIT_STATUS_ERROR);
-        }
-    }
 }
 
 fn try_get_password(args: &Cli, object_no: u64) -> Option<String> {
