@@ -18,7 +18,6 @@ use zff::header::{ChunkDeduplicationMap, ChunkSamebytesMap, ChunkHeaderMap, Chun
 use zff::ZffErrorKind;
 use zff::{
     Result,
-    helper::get_segment_of_chunk_no,
     header::{SegmentHeader, ObjectHeader, EncryptedObjectHeader, FileHeader, ChunkMaps, EncryptionInformation, HashHeader},
     footer::{SegmentFooter, MainFooter, ObjectFooter, EncryptedObjectFooter, FileFooter},
     HeaderCoding,
@@ -27,7 +26,7 @@ use zff::{
 
 // - external
 use clap::{Parser, ValueEnum};
-use log::{LevelFilter, error, warn, debug, info, trace};
+use log::{LevelFilter, error, warn, debug, info};
 use serde::Serialize;
 use dialoguer::{theme::ColorfulTheme, Password as PasswordDialog};
 
@@ -118,7 +117,7 @@ fn main() {
     };
     if args.verbose < 1 {
         container_info.segments.iter_mut().for_each(|(_, segment)| {
-            segment.chunkmaps = None;
+            segment.chunkmaps = BTreeMap::new();
         });
     }
     print_serialized_data(&args, container_info);
@@ -184,13 +183,13 @@ fn read_segments(inputfiles: &Vec<PathBuf>, args: &Cli) -> Result<ContainerInfo>
         };
         let seg_no = segment_header.segment_number;
 
-        // add chunkmaps to segment info
-        let mut chunkmaps = ChunkMaps::default();
-        // chunk header table 
-        let mut header_map = BTreeMap::new();
+        let mut chunkmaps: BTreeMap<u64, ChunkMaps> = BTreeMap::new();
+
+        // chunk header table
+        let mut header_maps = BTreeMap::new();
         for (_, offset) in &segment_footer.chunk_header_map_table {
             file.seek(SeekFrom::Start(*offset))?;
-            let mut chunk_header_map = match ChunkHeaderMap::decode_directly(&mut file) {
+            let chunk_header_map = match ChunkHeaderMap::decode_directly(&mut file) {
                 Ok(map) => map,
                 Err(e) => {
                     error!("Could not read chunk header map from {}.", inputfile.display());
@@ -198,15 +197,16 @@ fn read_segments(inputfiles: &Vec<PathBuf>, args: &Cli) -> Result<ContainerInfo>
                     exit(EXIT_STATUS_ERROR);
                 }
             };
-            header_map.extend(chunk_header_map.flush());
+            header_maps.entry(chunk_header_map.object_number())
+            .and_modify(|inner_map: &mut ChunkHeaderMap| inner_map.append(chunk_header_map.clone()))
+            .or_insert(chunk_header_map);
         }
-        chunkmaps.header_map = ChunkHeaderMap::with_data(header_map);
 
         // chunk same bytes table 
         let mut same_bytes_map = BTreeMap::new();
         for (_, offset) in &segment_footer.chunk_samebytes_map_table {
             file.seek(SeekFrom::Start(*offset))?;
-            let mut chunk_same_bytes_map = match ChunkSamebytesMap::decode_directly(&mut file) {
+            let chunk_same_bytes_map = match ChunkSamebytesMap::decode_directly(&mut file) {
                 Ok(map) => map,
                 Err(e) => {
                     error!("Could not read chunk same bytes map from {}.", inputfile.display());
@@ -214,15 +214,16 @@ fn read_segments(inputfiles: &Vec<PathBuf>, args: &Cli) -> Result<ContainerInfo>
                     exit(EXIT_STATUS_ERROR);
                 }
             };
-            same_bytes_map.extend(chunk_same_bytes_map.flush());
+            same_bytes_map.entry(chunk_same_bytes_map.object_number())
+            .and_modify(|inner_map: &mut ChunkSamebytesMap| inner_map.append(chunk_same_bytes_map.clone()))
+            .or_insert(chunk_same_bytes_map);
         }
-        chunkmaps.same_bytes_map = ChunkSamebytesMap::with_data(same_bytes_map);
 
         // chunk deduplication table
         let mut dedup_map = BTreeMap::new();
         for (_, offset) in &segment_footer.chunk_dedup_map_table {
             file.seek(SeekFrom::Start(*offset))?;
-            let mut chunk_dedup_map = match ChunkDeduplicationMap::decode_directly(&mut file) {
+            let chunk_dedup_map = match ChunkDeduplicationMap::decode_directly(&mut file) {
                 Ok(map) => map,
                 Err(e) => {
                     error!("Could not read chunk deduplication map from {}.", inputfile.display());
@@ -230,13 +231,28 @@ fn read_segments(inputfiles: &Vec<PathBuf>, args: &Cli) -> Result<ContainerInfo>
                     exit(EXIT_STATUS_ERROR);
                 }
             };
-            dedup_map.extend(chunk_dedup_map.flush());
+            dedup_map.entry(chunk_dedup_map.object_number())
+            .and_modify(|inner_map: &mut ChunkDeduplicationMap| inner_map.append(chunk_dedup_map.clone()))
+            .or_insert(chunk_dedup_map);
+        }
+
+        for (obj_no, map) in header_maps {
+            chunkmaps.entry(obj_no).or_default();
+            chunkmaps.get_mut(&obj_no).unwrap().header_map = map;
+        }
+        for (obj_no, map) in same_bytes_map {
+            chunkmaps.entry(obj_no).or_default();
+            chunkmaps.get_mut(&obj_no).unwrap().same_bytes_map = map;
+        }
+        for (obj_no, map) in dedup_map {
+            chunkmaps.entry(obj_no).or_default();
+            chunkmaps.get_mut(&obj_no).unwrap().duplicate_chunks = map;
         }
 
         let seg_info = SegmentInfo {
             header: segment_header,
             footer: segment_footer,
-            chunkmaps: Some(chunkmaps),
+            chunkmaps: chunkmaps,
         };
 
         reader.insert(seg_no, file);
@@ -561,7 +577,7 @@ fn integrity_check<R: Read + Seek>(container_info: &ContainerInfo, reader: &mut 
 
 // returns a BTreeMap with all chunk numbers of the container (and the appropriate offset), to see, if a chunk is missing or is available without a corresponding
 // object.
-fn get_all_chunk_numbers(container_info: &ContainerInfo) -> BTreeMap<u64, (u64, u64)> {
+/*fn get_all_chunk_numbers(container_info: &ContainerInfo) -> BTreeMap<u64, (u64, u64)> {
     let mut all_chunk_numbers = BTreeMap::new();
     let main_footer = match &container_info.main_footer {
         Some(footer) => footer,
@@ -586,8 +602,7 @@ fn get_all_chunk_numbers(container_info: &ContainerInfo) -> BTreeMap<u64, (u64, 
                 exit(EXIT_STATUS_ERROR);
             },
         };
-        // unwrap is safe here while the option is just used to handle the serialisation of the chunkmaps
-        let offset = match segment.chunkmaps.as_ref().unwrap().header_map.chunkmap().get(&chunk_no) {
+        let offset = match segment.chunkmaps.values().header_map.chunkmap().get(&chunk_no) {
             Some(header) => header.offset,
             None => {
                 error!("Chunk {chunk_no} not found in chunkmaps of segment {}, integrity check not possible.", segment.header.segment_number);
@@ -597,7 +612,7 @@ fn get_all_chunk_numbers(container_info: &ContainerInfo) -> BTreeMap<u64, (u64, 
         all_chunk_numbers.insert(chunk_no, (segment.header.segment_number, offset));
     }
     all_chunk_numbers
-}
+}*/
 
 fn try_get_password(args: &Cli, object_no: u64) -> Option<String> {
     match args.decryption_passwords.get(object_no.to_string()) {

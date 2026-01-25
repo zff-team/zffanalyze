@@ -187,7 +187,7 @@ impl Serialize for ContainerInfo {
 pub(crate) struct SegmentInfo {
     pub header: SegmentHeader,
     pub footer: SegmentFooter,
-    pub chunkmaps: Option<ChunkMaps>
+    pub chunkmaps: BTreeMap<u64, ChunkMaps> // <object_number, chunkmaps>
 }
 
 impl Serialize for SegmentInfo {
@@ -205,7 +205,13 @@ impl Serialize for SegmentInfo {
                     self.header.chunkmap_size.bytes_as_hrb(), self.header.chunkmap_size))?;
         state.serialize_field(SER_FIELD_LENGTH_OF_SEGMENT, &self.footer.length_of_segment)?;
         state.serialize_field(SER_FIELD_FIRST_CHUNK_NUMBER, &self.footer.first_chunk_number)?;
-        state.serialize_field(SER_FIELD_CHUNKMAPS, &self.chunkmaps)?;
+        let mut chunkmaps = BTreeMap::new();
+        for (key, value) in &self.chunkmaps {
+            chunkmaps.insert(key.to_string(), value);
+        }
+        if !chunkmaps.is_empty() {
+            state.serialize_field(SER_FIELD_CHUNKMAPS, &chunkmaps)?;
+        }
         state.end()
     }
 }
