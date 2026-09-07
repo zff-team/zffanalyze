@@ -1,26 +1,24 @@
 // - STD
-use std::process::exit;
-use std::path::PathBuf;
 use std::error::Error;
-use std::io::{Seek, SeekFrom, Read};
+use std::io::{Read, Seek, SeekFrom};
+use std::path::PathBuf;
+#[cfg(target_family = "unix")]
+use std::process::exit;
 
 // - modules
 pub mod constants;
-pub mod traits;
 mod serde;
+pub mod traits;
 
 // - re-exports
 pub(crate) use self::serde::*;
 
 // - internal
+#[cfg(target_family = "unix")]
 use crate::constants::*;
 use zff::{
-    Result,
-    footer::{SegmentFooter, MainFooter},
-    ZffError,
-    ZffErrorKind,
-    ValueDecoder,
-    HeaderCoding,
+    footer::{MainFooter, SegmentFooter},
+    HeaderCoding, Result, ValueDecoder, ZffError, ZffErrorKind,
 };
 
 // workaround to enable the correct construction of snap packages. Will be replaced by something more elegant in the future.
@@ -40,7 +38,7 @@ pub fn concat_prefix_path<P: Into<String>, S: Into<String>>(prefix: P, path: S) 
         Ok(path) => {
             new_path.push(path);
             new_path
-        },
+        }
         Err(e) => {
             eprintln!("{ERROR_STRIPPING_PREFIX_INPUT_FILE_}{path} - {e}");
             exit(EXIT_STATUS_ERROR);
@@ -49,12 +47,14 @@ pub fn concat_prefix_path<P: Into<String>, S: Into<String>>(prefix: P, path: S) 
 }
 
 #[cfg(target_family = "windows")]
-pub fn concat_prefix_path<P: Into<String>, S: Into<String>>(prefix: P, path: S) -> PathBuf {
+pub fn concat_prefix_path<P: Into<String>, S: Into<String>>(_prefix: P, path: S) -> PathBuf {
     PathBuf::from(path.into())
 }
 
 /// Parse a single key-value pair
-pub(crate) fn parse_key_val<T, U>(s: &str) -> std::result::Result<(T, U), Box<dyn Error + Send + Sync + 'static>>
+pub(crate) fn parse_key_val<T, U>(
+    s: &str,
+) -> std::result::Result<(T, U), Box<dyn Error + Send + Sync + 'static>>
 where
     T: std::str::FromStr,
     T::Err: Error + Send + Sync + 'static,
@@ -69,7 +69,7 @@ where
 
 pub(crate) enum Footer {
     Segment(SegmentFooter),
-    MainAndSegment((MainFooter, SegmentFooter))
+    MainAndSegment((MainFooter, SegmentFooter)),
 }
 
 pub(crate) fn try_find_footer<R: Read + Seek>(reader: &mut R) -> Result<Footer> {

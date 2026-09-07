@@ -1,69 +1,44 @@
-name: Build and test workflow
+name: Build and test
 
-on: [ push, pull_request ]
+on: [push, pull_request]
+
+permissions:
+  contents: read
 
 env:
   CARGO_TERM_COLOR: always
-  LLVM-MINGW-TOOLCHAIN-NAME: llvm-mingw-20240619-ucrt-ubuntu-20.04-x86_64
 
 jobs:
-  build:
-    runs-on: ${{ matrix.os }}
-    name: ${{ matrix.name }}
+  test:
     strategy:
+      fail-fast: false
       matrix:
-        os:
-          - ubuntu-20.04
-          - ubuntu-latest # only used for building the windows aarch64 binary
-          - windows-latest
-          - macos-latest
         include:
-          - os: ubuntu-20.04
-            libacl: libacl1-dev
+          - os: ubuntu-24.04
             toolchain: stable
-            target: x86_64-unknown-linux-gnu
-            name: Linux (Ubuntu 20.04)
-          - os: ubuntu-latest
-            libacl: "" # no libacl on ubuntu-latest for windows aarch64
-            toolchain: nightly
-            target: aarch64-pc-windows-gnullvm
-            name: Windows aarch64 (cross-compiled on Ubuntu 24.04)
-          - os: windows-latest
-            libacl: ""
-            toolchain: nightly
-            target: x86_64-pc-windows-msvc
-            name: Windows x86_64 (MSVC)
-          - os: macos-latest
-            libacl: ""
+          - os: ubuntu-24.04
+            toolchain: '1.89.0'
+          - os: ubuntu-24.04-arm
             toolchain: stable
-            target: aarch64-apple-darwin
-            name: macOS (arm64)
-    
+          - os: windows-2025
+            toolchain: stable
+          - os: windows-11-arm
+            toolchain: stable
+          - os: macos-15
+            toolchain: stable
+    runs-on: ${{ matrix.os }}
     steps:
-    - uses: actions/checkout@v2
-
-    - name: Set up Rust
-      uses: actions-rs/toolchain@v1
-      with:
-        toolchain: ${{ matrix.toolchain }}
-        target: ${{ matrix.target }}
-        components: clippy
-        default: true
-    
-    - name: Install acl-deps (Linux only)
-      if: matrix.os == 'ubuntu-20.04'
-      run: sudo apt-get install -y ${{ matrix.libacl }}
-    
-    - name: Install LLVM MinGW toolchain (Windows aarch64)
-      if: matrix.os == 'ubuntu-latest'
-      run: |
-          curl -L -o ${{ env.LLVM-MINGW-TOOLCHAIN-NAME }}.tar.xz https://github.com/mstorsjo/llvm-mingw/releases/download/20240619/${{ env.LLVM-MINGW-TOOLCHAIN-NAME }}.tar.xz
-          tar -xf ${{ env.LLVM-MINGW-TOOLCHAIN-NAME }}.tar.xz
-          echo "$GITHUB_WORKSPACE/${{ env.LLVM-MINGW-TOOLCHAIN-NAME }}/bin" >> $GITHUB_PATH
-    
-    - name: Build ${{ matrix.target }}
-      run: cargo clippy --verbose --all-features --target ${{ matrix.target }}
-    
-    - name: Run tests
-      if: matrix.os != 'ubuntu-latest'
-      run: cargo test --verbose --all-features --target ${{ matrix.target }}
+      - uses: actions/checkout@v4
+      - uses: dtolnay/rust-toolchain@master
+        with:
+          toolchain: ${{ matrix.toolchain }}
+          components: rustfmt, clippy
+      - name: Check formatting
+        run: cargo fmt --all --check
+      - name: Lint
+        run: cargo clippy --locked --all-targets --all-features -- -D warnings
+      - name: Test
+        run: cargo test --locked --all-features
+      - name: Verify crate package
+        if: matrix.os == 'ubuntu-24.04' && matrix.toolchain == 'stable'
+        run: cargo package --locked

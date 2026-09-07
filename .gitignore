@@ -1,1 +1,4 @@
-Cargo.lock
+
+# Local build and verification helpers for the sandboxed builder on this
+# machine. Machine configuration, not project configuration.
+/.scripts/

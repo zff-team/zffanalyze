@@ -2,12 +2,15 @@
 pub(crate) const INPUTFILES_PATH_PREFIX: &str = "/";
 
 // Error messages
-pub(crate) const ERROR_CANONICALIZE_INPUT_FILE_: &str = "An error occurred while trying to canonicalize following inputfile: ";
-pub(crate) const ERROR_STRIPPING_PREFIX_INPUT_FILE_: &str = "An error occurred while trying to stripping the path-prefix of following inputfile: ";
+#[cfg(target_family = "unix")]
+pub(crate) const ERROR_CANONICALIZE_INPUT_FILE_: &str =
+    "An error occurred while trying to canonicalize following inputfile: ";
+#[cfg(target_family = "unix")]
+pub(crate) const ERROR_STRIPPING_PREFIX_INPUT_FILE_: &str =
+    "An error occurred while trying to stripping the path-prefix of following inputfile: ";
 
 // Exit status codes
 pub(crate) const EXIT_STATUS_ERROR: i32 = 1;
-pub(crate) const EXIT_STATUS_SUCCESS: i32 = 0;
 
 // default values
 pub(crate) const DEFAULT_DATE_FORMAT: &str = "[year]-[month]-[day] [hour]:[minute]:[second] UTC";
@@ -16,14 +19,12 @@ pub(crate) const DEFAULT_DATE_FORMAT: &str = "[year]-[month]-[day] [hour]:[minut
 #[cfg(target_family = "unix")]
 pub(crate) const UNIX_BASE: &str = "/";
 
-
 // Serialized struct names
 pub(crate) const SER_STRUCT_CONTAINER_INFO: &str = "container_info";
 pub(crate) const SER_STRUCT_OBJECT_INFO: &str = "object_info";
 pub(crate) const SER_FIELD_ENCRYPTED_OBJECT_INFOS: &str = "encrypted_object";
 pub(crate) const SER_STRUCT_SEGMENT_INFO: &str = "segment_info";
 pub(crate) const SER_STRUCT_FILE_INFO: &str = "file_info";
-
 
 // Serializer field names
 pub(crate) const SER_FIELD_OBJECT_NUMBER: &str = "object_number";
