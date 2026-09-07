@@ -25,6 +25,7 @@ pub(crate) struct ObjectInfo {
     pub header: ObjectHeader,
     pub footer: ObjectFooter,
     pub files: Option<BTreeMap<u64, FileInfo>>,
+    pub virtual_files: Option<BTreeMap<u64, VirtualFileInfo>>,
 }
 
 impl Serialize for ObjectInfo {
@@ -39,7 +40,9 @@ impl Serialize for ObjectInfo {
         };
         let mut state = serializer.serialize_struct(
             SER_STRUCT_OBJECT_INFO,
-            7 + footer_value + usize::from(self.files.is_some()),
+            7 + footer_value
+                + usize::from(self.files.is_some())
+                + usize::from(self.virtual_files.is_some()),
         )?;
         state.serialize_field(SER_FIELD_OBJECT_NUMBER, &self.header.object_number)?;
         state.serialize_field(SER_FIELD_CHUNK_SIZE, &self.header.chunk_size)?;
@@ -141,6 +144,36 @@ impl Serialize for ObjectInfo {
             state.serialize_field(SER_FIELD_FILE, &converted_map)?;
         }
 
+        if let Some(files) = &self.virtual_files {
+            let converted: BTreeMap<String, _> =
+                files.iter().map(|(n, f)| (n.to_string(), f)).collect();
+            state.serialize_field(SER_FIELD_FILE, &converted)?;
+        }
+        state.end()
+    }
+}
+
+#[derive(Debug)]
+pub(crate) struct VirtualFileInfo {
+    pub header: FileHeader,
+    pub footer: zff::footer::VirtualFileFooter,
+    pub map: Option<zff::footer::VirtualFileMap>,
+}
+
+impl Serialize for VirtualFileInfo {
+    fn serialize<S: Serializer>(&self, serializer: S) -> std::result::Result<S::Ok, S::Error> {
+        let mut state =
+            serializer.serialize_struct("virtual_file", 2 + usize::from(self.map.is_some()))?;
+        state.serialize_field("header", &self.header)?;
+        state.serialize_field("footer", &self.footer)?;
+        if let Some(map) = &self.map {
+            let extents: BTreeMap<String, _> = map
+                .extents
+                .iter()
+                .map(|(n, e)| (n.to_string(), e))
+                .collect();
+            state.serialize_field("extents", &extents)?;
+        }
         state.end()
     }
 }

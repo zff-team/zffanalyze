@@ -71,9 +71,20 @@ zffanalyze -i image.z01 image.z02 image.z03 -c
 `-k` performs those integrity checks and verifies every stored hash signature.
 Verification fails if data hashes are missing, data is corrupt, segments are
 missing or duplicated, acquisition errors are recorded, or objects cannot be
-decrypted. With `-k`, missing or invalid signatures also cause failure. Virtual objects can be inspected, but verification rejects
-them because they do not provide independent data hashes. A container containing
-virtual objects therefore cannot receive a successful whole-container verification.
+decrypted. With `-k`, missing or invalid signatures also cause failure.
+
+Virtual files are verified by reconstructing their mapped content and comparing
+their own stored hashes (and signatures with `-k`). Source
+objects and their chunks are checked as well; shared source ranges are allowed.
+Directory entries, symbolic-link targets, hardlink target numbers, and special-file
+content are hashed using the format's inline encoding. These hashes authenticate
+that content, not all file metadata (such as names or timestamps).
+
+Virtual maps must cover the whole file without gaps or overlaps, and every source
+range must exist and fit within its physical object or logical file. Missing
+sources, invalid file indexes, and directory/hardlink cycles are errors.
+Virtual-to-virtual source mappings remain unsupported and return an explicit
+error. Symbolic links are checked as stored; filesystem targets are not followed.
 
 For encrypted objects, supply `-p OBJECT:PASSWORD` (repeat for multiple objects)
 or enter the password interactively. `-I` skips password prompts and displays
@@ -82,7 +93,8 @@ Incorrect supplied passwords are errors. Command-line passwords may be visible
 in process listings; prefer the interactive prompt.
 
 The default output is TOML. Use `-f json` or `-f json-pretty` for JSON, `-v` to
-include chunk maps and chunk headers, and `-vv` to include logical file metadata.
+include chunk maps and chunk headers, and `-vv` to include logical and virtual
+file metadata.
 Metadata output omits decrypted encryption keys.
 
 Exit status `0` means output or complete verification succeeded, `1` means an

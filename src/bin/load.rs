@@ -195,9 +195,11 @@ pub(crate) fn read_container(
             header,
             footer,
             files: None,
+            virtual_files: None,
         };
         // Validate logical metadata even when it will not be displayed.
         read_files(&mut object, &mut readers)?;
+        read_virtual_files(&mut object, &mut readers)?;
         objects.insert(number, object);
     }
     let mut container = ContainerInfo {
@@ -246,6 +248,7 @@ pub(crate) fn read_container(
     if args.verbose < 2 && !args.check_integrity && args.public_key.is_none() {
         for object in container.objects.values_mut() {
             object.files = None;
+            object.virtual_files = None;
         }
     }
     Ok((container, readers))
@@ -356,4 +359,79 @@ fn same_keys(
     b: &std::collections::HashMap<u64, u64>,
 ) -> bool {
     a.len() == b.len() && a.keys().all(|key| b.contains_key(key))
+}
+
+fn read_virtual_files(object: &mut ObjectInfo, readers: &mut BTreeMap<u64, File>) -> Result<()> {
+    use zff::footer::{VirtualFileFooter, VirtualFileFooterContent, VirtualFileMap};
+    let ObjectFooter::Virtual(footer) = &object.footer else {
+        return Ok(());
+    };
+    if !same_keys(
+        &footer.file_header_offsets,
+        &footer.file_header_segment_numbers,
+    ) || !same_keys(&footer.file_header_offsets, &footer.file_footer_offsets)
+        || !same_keys(
+            &footer.file_header_offsets,
+            &footer.file_footer_segment_numbers,
+        )
+        || footer
+            .root_dir_filenumbers
+            .iter()
+            .any(|n| !footer.file_header_offsets.contains_key(n))
+    {
+        return Err(invalid("Virtual file header/footer indexes disagree"));
+    }
+    let enc = if object.header.encryption_header.is_some() {
+        Some(EncryptionInformation::try_from(&object.header)?)
+    } else {
+        None
+    };
+    let mut files = BTreeMap::new();
+    for (number, offset) in &footer.file_header_offsets {
+        let reader = readers
+            .get_mut(&footer.file_header_segment_numbers[number])
+            .ok_or_else(|| invalid("Missing virtual file header segment"))?;
+        reader.seek(SeekFrom::Start(*offset))?;
+        let header = match &enc {
+            Some(enc) => FileHeader::decode_encrypted_header_with_key(reader, enc)?,
+            None => FileHeader::decode_directly(reader)?,
+        };
+        let reader = readers
+            .get_mut(&footer.file_footer_segment_numbers[number])
+            .ok_or_else(|| invalid("Missing virtual file footer segment"))?;
+        reader.seek(SeekFrom::Start(footer.file_footer_offsets[number]))?;
+        let file_footer = match &enc {
+            Some(enc) => VirtualFileFooter::decode_encrypted_footer_with_key(reader, enc)?,
+            None => VirtualFileFooter::decode_directly(reader)?,
+        };
+        if *number == 0 || header.file_number != *number || file_footer.filenumber != *number {
+            return Err(invalid("Virtual file number does not match its index"));
+        }
+        let map = if let VirtualFileFooterContent::FileMap(segment, offset) = &file_footer.vffc {
+            let reader = readers
+                .get_mut(segment)
+                .ok_or_else(|| invalid("Missing virtual file map segment"))?;
+            reader.seek(SeekFrom::Start(*offset))?;
+            let map = match &enc {
+                Some(enc) => VirtualFileMap::decode_encrypted_footer_with_key(reader, enc)?,
+                None => VirtualFileMap::decode_directly(reader)?,
+            };
+            if map.filenumber != *number {
+                return Err(invalid("Virtual file map number does not match its file"));
+            }
+            Some(map)
+        } else {
+            None
+        };
+        files.insert(
+            *number,
+            VirtualFileInfo {
+                header,
+                footer: file_footer,
+                map,
+            },
+        );
+    }
+    object.virtual_files = Some(files);
+    Ok(())
 }

@@ -32,9 +32,8 @@ fn output_write_failure_is_propagated() {
 }
 
 #[test]
-fn virtual_and_empty_containers_cannot_report_verification_success() {
-    use zff::header::{CompressionHeader, DescriptionHeader, ObjectFlags, ObjectType};
-    let mut container = ContainerInfo {
+fn empty_containers_cannot_report_verification_success() {
+    let container = ContainerInfo {
         main_footer: None,
         segments: BTreeMap::new(),
         objects: BTreeMap::new(),
@@ -46,31 +45,4 @@ fn virtual_and_empty_containers_cannot_report_verification_success() {
             .to_string()
             .contains("no objects")
     );
-    let header = ObjectHeader::new(
-        1,
-        None,
-        128,
-        CompressionHeader::new(zff::CompressionAlgorithm::None, 0, 1.0),
-        DescriptionHeader::new_empty(),
-        ObjectType::Virtual,
-        ObjectFlags::default(),
-    );
-    container.objects.insert(
-        1,
-        ObjectInfo {
-            header,
-            footer: ObjectFooter::Virtual(zff::footer::ObjectFooterVirtual::new_empty(1)),
-            files: None,
-        },
-    );
-    assert!(
-        verify::verify(&container, BTreeMap::new(), &BTreeMap::new(), None)
-            .unwrap_err()
-            .to_string()
-            .contains("virtual objects")
-    );
-    let args = Cli::try_parse_from(["zffanalyze", "-i", "unused"]).unwrap();
-    let mut output = Vec::new();
-    print_serialized_data(&args, &container, &mut output).unwrap();
-    toml::from_str::<toml::Value>(std::str::from_utf8(&output).unwrap()).unwrap();
 }

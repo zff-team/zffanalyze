@@ -19,13 +19,6 @@ pub(crate) fn verify(
     if container.objects.is_empty() {
         return Err(invalid("Verification incomplete: no objects to verify"));
     }
-    if container
-        .objects
-        .values()
-        .any(|o| matches!(o.footer, ObjectFooter::Virtual(_)))
-    {
-        return Err(invalid("Verification incomplete: virtual objects do not provide independent data hashes and are not supported"));
-    }
     let mut chunks = BTreeMap::new();
     for segment in container.segments.values() {
         for (object, maps) in &segment.chunkmaps {
@@ -50,9 +43,17 @@ pub(crate) fn verify(
         ));
     }
     let mut reader = ZffReader::with_reader(files.into_values().collect())?;
-    reader.initialize_objects_all()?;
+    // Virtual content is read from validated source extents below. Only source
+    // object readers are needed; this also avoids ordering-dependent virtual initialization.
+    for (number, object) in &container.objects {
+        if !matches!(object.footer, ObjectFooter::Virtual(_)) {
+            reader.initialize_object(*number)?;
+        }
+    }
     for (number, password) in passwords {
-        reader.decrypt_object(*number, password)?;
+        if !matches!(container.objects[number].footer, ObjectFooter::Virtual(_)) {
+            reader.decrypt_object(*number, password)?;
+        }
     }
     let mut checked = BTreeSet::new();
     let mut streams = 0;
@@ -100,7 +101,9 @@ pub(crate) fn verify(
                     streams += 1;
                 }
             }
-            ObjectFooter::Virtual(_) => unreachable!(),
+            ObjectFooter::Virtual(_) => {
+                streams += super::virtual_verify::verify_virtual(container, object, &reader, key)?;
+            }
         }
     }
     if checked.len() != chunks.len() || streams == 0 {
@@ -195,25 +198,44 @@ impl StreamVerifier<'_> {
             }
         }
         for (stored, hasher) in hashes.hashes.iter().zip(hashers) {
-            if hasher.finalize().as_ref() != stored.hash().as_slice() {
-                return Err(invalid(format!(
-                    "{} data hash mismatch for object {}, file {file}",
-                    stored.hash_type(),
-                    self.object
-                )));
-            }
-            if let Some(key) = self.key {
-                let signature = stored.ed25519_signature().ok_or_else(|| {
-                    invalid(format!(
-                        "Verification incomplete: missing {} signature",
-                        stored.hash_type()
-                    ))
-                })?;
-                if !Signature::verify_with_base64_key(key, stored.hash(), signature)? {
-                    return Err(invalid(format!("Invalid {} signature", stored.hash_type())));
-                }
-            }
+            check_hash(
+                stored,
+                hasher.finalize().as_ref(),
+                self.key,
+                self.object,
+                file,
+            )?;
         }
         Ok(())
     }
+}
+
+pub(crate) fn check_hash(
+    stored: &zff::header::HashValue,
+    actual: &[u8],
+    key: Option<&str>,
+    object: u64,
+    file: u64,
+) -> Result<()> {
+    if actual != stored.hash().as_slice() {
+        return Err(invalid(format!(
+            "{} data hash mismatch for object {object}, file {file}",
+            stored.hash_type()
+        )));
+    }
+    if let Some(key) = key {
+        let signature = stored.ed25519_signature().ok_or_else(|| {
+            invalid(format!(
+                "Verification incomplete: missing {} signature for object {object}, file {file}",
+                stored.hash_type()
+            ))
+        })?;
+        if !Signature::verify_with_base64_key(key, stored.hash(), signature)? {
+            return Err(invalid(format!(
+                "Invalid {} signature for object {object}, file {file}",
+                stored.hash_type()
+            )));
+        }
+    }
+    Ok(())
 }

@@ -396,3 +396,6 @@ fn recorded_chunk_checksums_and_acquisition_errors_are_checked() {
     rewrite_first_chunk(&f, |header| header.flags.error = true);
     failure(cli(&f.paths, &["-c"]), "acquisition error");
 }
+
+#[path = "support/virtual_objects.rs"]
+mod virtual_objects;

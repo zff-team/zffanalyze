@@ -7,6 +7,7 @@ use std::process::exit;
 mod load;
 mod res;
 mod verify;
+mod virtual_verify;
 use clap::{Parser, ValueEnum};
 use dialoguer::{theme::ColorfulTheme, Password as PasswordDialog};
 use log::{debug, error, info, warn, LevelFilter};
@@ -37,7 +38,7 @@ struct Cli {
     output_format: OutputFormat,
 
     /// Verbose mode to show more information. Can be used multiple times.
-    /// Use once for chunk maps (including chunk headers), twice for logical file metadata.
+    /// Use once for chunk maps (including chunk headers), twice for logical and virtual file metadata.
     #[arg(short='v', long="verbose", action = clap::ArgAction::Count)]
     verbose: u8,
 
